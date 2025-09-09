@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Marwa\Router;
 
 use League\Route\Router as LeagueRouter;
-use League\Route\RouteGroup;
+use League\Route\Strategy\StrategyInterface;
 use Marwa\Router\Attributes\{
     Prefix,
     Route as RouteAttr,
@@ -19,33 +19,34 @@ use Marwa\Router\Exceptions\InvalidRouteDefinitionException;
 use Marwa\Router\Middleware\ThrottleMiddleware;
 use Marwa\Router\Support\ClassLocator;
 use Marwa\Router\Strategy\HtmlStrategy;
+use Marwa\Router\Strategy\JsonStrategy;
 use Psr\Container\ContainerInterface;
 use Psr\Http\Message\{ResponseFactoryInterface, ResponseInterface, ServerRequestInterface};
-use Laminas\Diactoros\ResponseFactory;
-use Laminas\HttpHandlerRunner\Emitter\SapiEmitter;
+use Psr\SimpleCache\CacheInterface;
 use ReflectionAttribute;
 use ReflectionClass;
 use ReflectionMethod;
-use Psr\SimpleCache\CacheInterface;
-use League\Route\Strategy\StrategyInterface;
+
+// PSR-7 implementation & emitter
+use Laminas\Diactoros\ResponseFactory;
+use Laminas\Diactoros\ServerRequestFactory;
+use Laminas\HttpHandlerRunner\Emitter\SapiEmitter;
 
 final class RouterFactory
 {
-
+    /** Human-readable route table for dump tool */
     /** @var array<int, array{methods:array<int,string>,path:string,name:?string,controller:?string,action:?string,domain:?string}> */
     private array $registry = [];
 
     private LeagueRouter $router;
+    private ?StrategyInterface $strategy = null;
+
     private ?ContainerInterface $container;
     private ResponseFactoryInterface $responseFactory;
     private ?CacheInterface $cache;
 
     /** If true, every route matches with and without a trailing slash. */
     private bool $trailingSlashOptional = true;
-
-
-    // store the strategy when you set it (if you aren’t already)
-    private ?StrategyInterface $strategy = null;
 
     public function __construct(
         ?ContainerInterface $container = null,
@@ -58,34 +59,15 @@ final class RouterFactory
         $this->cache           = $cache;
         $this->router          = $router ?? new LeagueRouter();
 
-        $this->useStrategy(new HtmlStrategy($this->responseFactory)); // default text/html
+        // Default strategy: HTML
+        $this->useHtmlStrategy();
     }
 
-    public function useStrategy(StrategyInterface $strategy): self
-    {
-        if (method_exists($strategy, 'setContainer') && $this->container) {
-            $strategy->setContainer($this->container);
-        }
-        $this->strategy = $strategy;
-        $this->router->setStrategy($strategy);
-        return $this;
-    }
+    // -------------------------------------------------
+    // Public API
+    // -------------------------------------------------
 
-    /**
-     * Allow app code to provide a custom 404 renderer without touching League.
-     * Works for strategies that implement CustomNotFoundTrait.
-     *
-     * @param callable|\Psr\Http\Server\RequestHandlerInterface $handler
-     */
-    public function setNotFoundHandler($handler): self
-    {
-        if ($this->strategy && method_exists($this->strategy, 'setNotFoundHandler')) {
-            $this->strategy->setNotFoundHandler($handler);
-        }
-        return $this;
-    }
-
-    /** Optionally disable/enable optional trailing slash matching. */
+    /** Toggle optional trailing slash matching globally. */
     public function setTrailingSlashOptional(bool $on): self
     {
         $this->trailingSlashOptional = $on;
@@ -95,36 +77,83 @@ final class RouterFactory
     public function setContainer(ContainerInterface $container): self
     {
         $this->container = $container;
+        // reattach container if strategy supports it
+        if ($this->strategy && \method_exists($this->strategy, 'setContainer')) {
+            $this->strategy->setContainer($container);
+        }
         return $this;
     }
+
     public function setCache(CacheInterface $cache): self
     {
         $this->cache = $cache;
         return $this;
     }
 
+    /** Replace the internal League strategy (Html/Json/Text or custom). */
+    public function useStrategy(StrategyInterface $strategy): self
+    {
+        if (\method_exists($strategy, 'setContainer') && $this->container) {
+            $strategy->setContainer($this->container);
+        }
+        $this->strategy = $strategy;
+        $this->router->setStrategy($strategy);
+        return $this;
+    }
+
+    public function useHtmlStrategy(): self
+    {
+        return $this->useStrategy(new HtmlStrategy($this->responseFactory));
+    }
+
+    public function useJsonStrategy(int $jsonFlags = 0): self
+    {
+        return $this->useStrategy(new JsonStrategy($this->responseFactory, $jsonFlags));
+    }
+
+
+    /**
+     * Allow app code to set a custom 404 renderer on strategies that support it
+     * (i.e., have setNotFoundHandler() method via a shared trait).
+     *
+     * @param callable|\Psr\Http\Server\RequestHandlerInterface $handler
+     */
+    public function setNotFoundHandler($handler): self
+    {
+        if ($this->strategy && \method_exists($this->strategy, 'setNotFoundHandler')) {
+            $this->strategy->setNotFoundHandler($handler);
+        }
+        return $this;
+    }
+
+    /** Dispatch a PSR-7 request. */
     public function dispatch(ServerRequestInterface $request): ResponseInterface
     {
         return $this->router->dispatch($request);
     }
 
+    /** Convenience for SAPI usage (Diactoros ServerRequest + SapiEmitter). */
     public function run(): void
     {
-        $request  = \Laminas\Diactoros\ServerRequestFactory::fromGlobals();
+        $request  = ServerRequestFactory::fromGlobals();
         $response = $this->dispatch($request);
         (new SapiEmitter())->emit($response);
     }
 
+    /** Expose the route table for dump/debug. */
     public function routes(): array
     {
         return $this->registry;
     }
 
-    // ---------- Attribute scanning ----------
+    // -------------------------------------------------
+    // Attribute scanning (eager registration)
+    // -------------------------------------------------
 
     /** @param string[] $controllerDirs */
     public function registerFromDirectories(array $controllerDirs, bool $strict = false): self
     {
+        // Require files, collect classes (Windows-safe path filtering)
         $classes = ClassLocator::loadAndCollectClasses(
             fn() => ClassLocator::requirePhpFiles($controllerDirs, $strict),
             $controllerDirs
@@ -134,13 +163,8 @@ final class RouterFactory
             $list = implode(', ', array_map(static fn($p) => rtrim($p, "\\/"), $controllerDirs));
             throw new \RuntimeException("No classes discovered under: {$list}");
         }
-        return $this->registerFromClasses($classes);
-    }
 
-    private function normalizePrefix(string $p): string
-    {
-        $p = '/' . ltrim(trim($p), '/');
-        return rtrim($p, '/'); // store canonical without trailing slash
+        return $this->registerFromClasses($classes);
     }
 
     /** @param array<class-string> $classNames */
@@ -151,65 +175,39 @@ final class RouterFactory
             if ($ref->isAbstract() || $ref->isInterface()) continue;
 
             $prefixAttr    = $this->firstAttr($ref, Prefix::class)?->newInstance();
-            $ctrlMw        = $this->collectUseMiddlewares($ref);
-            $groupMw       = $this->collectGroupMiddlewares($ref);
-            $whereCtrl     = $this->collectWhere($ref);
+            $prefixPath    = isset($prefixAttr?->path) ? $this->normalizePrefix($prefixAttr->path) : '';
+            $namePrefix    = $prefixAttr?->name ?? null;
+
+            $ctrlMw        = $this->collectUseMiddlewares($ref);   // class @UseMiddleware
+            $groupMw       = $this->collectGroupMiddlewares($ref); // class @GroupMiddleware
+            $allCtrlMw     = array_merge($groupMw, $ctrlMw);       // apply both per-route (eager)
+            $whereCtrl     = $this->collectWhere($ref);            // class @Where
             $domainCtrl    = $this->firstAttr($ref, DomainAttr::class)?->newInstance()->host ?? null;
             $throttleClass = $this->firstAttr($ref, ThrottleAttr::class)?->newInstance();
 
-            //$prefixPath = $prefixAttr->path ?? '';
-            //$namePrefix = $prefixAttr->name ?? null;
-            $prefixPath = isset($prefixAttr->path) ? $this->normalizePrefix($prefixAttr->path) : '';
-            $namePrefix = $prefixAttr->name ?? null;
-
-            if ($prefixPath) {
-                $this->router->group($prefixPath, function (RouteGroup $group) use (
-                    $ref,
-                    $ctrlMw,
-                    $groupMw,
-                    $namePrefix,
-                    $prefixPath,
-                    $whereCtrl,
-                    $domainCtrl,
-                    $throttleClass
-                ) {
-                    foreach ($groupMw as $mw) {
-                        $group->middleware($this->resolveMiddleware($mw));
-                    }
-                    $this->registerControllerMethods(
-                        $group,
-                        $ref,
-                        $ctrlMw,
-                        $namePrefix,
-                        $prefixPath,
-                        $whereCtrl,
-                        $domainCtrl,
-                        $throttleClass
-                    );
-                });
-            } else {
-                $this->registerControllerMethods(
-                    $this->router,
-                    $ref,
-                    $ctrlMw,
-                    $namePrefix,
-                    '',
-                    $whereCtrl,
-                    $domainCtrl,
-                    $throttleClass
-                );
-            }
+            // EAGER: map routes directly (do NOT use $router->group() which is lazy)
+            $this->registerControllerMethods(
+                $this->router,
+                $ref,
+                $allCtrlMw,
+                $namePrefix,
+                $prefixPath,
+                $whereCtrl,
+                $domainCtrl,
+                $throttleClass
+            );
         }
+
         return $this;
     }
 
     /**
-     * @param LeagueRouter|RouteGroup $target
+     * @param LeagueRouter $target (kept for signature compatibility)
      * @param array<class-string> $classMiddlewares
      * @param array<string,string> $classWhere
      */
     private function registerControllerMethods(
-        $target,
+        LeagueRouter $target,
         ReflectionClass $controller,
         array $classMiddlewares,
         ?string $namePrefix,
@@ -222,21 +220,24 @@ final class RouterFactory
             $routeAttrs = $method->getAttributes(RouteAttr::class, ReflectionAttribute::IS_INSTANCEOF);
             if (!$routeAttrs) continue;
 
-            $methodWhere      = $this->collectWhere($method);
-            $effectiveWhere   = $classWhere + $methodWhere;
-            $methodDomainAttr = $this->firstAttr($method, DomainAttr::class)?->newInstance()->host ?? null;
-            $effectiveDomain  = $methodDomainAttr ?? $classDomain;
-            $methodThrottle   = $this->firstAttr($method, ThrottleAttr::class)?->newInstance() ?? null;
+            // Method-level overrides
+            $methodWhere       = $this->collectWhere($method);
+            $effectiveWhere    = array_merge($classWhere, $methodWhere); // method overrides class
+            $methodDomainAttr  = $this->firstAttr($method, DomainAttr::class)?->newInstance()->host ?? null;
+            $effectiveDomain   = $methodDomainAttr ?? $classDomain;
+            $methodThrottle    = $this->firstAttr($method, ThrottleAttr::class)?->newInstance() ?? null;
             $effectiveThrottle = $methodThrottle ?? $classThrottle;
 
             foreach ($routeAttrs as $attr) {
                 /** @var RouteAttr $routeMeta */
                 $routeMeta = $attr->newInstance();
 
+                // HTTP methods
                 $methods = array_values(array_filter(array_map(
                     static fn(string $m) => strtoupper(trim($m)),
                     is_array($routeMeta->methods) ? $routeMeta->methods : [$routeMeta->methods]
                 ), static fn(string $m) => $m !== ''));
+
                 if (!$methods) {
                     throw new InvalidRouteDefinitionException(sprintf(
                         'Invalid Route attribute (no methods) on %s::%s',
@@ -245,22 +246,27 @@ final class RouterFactory
                     ));
                 }
 
-                $child  = ltrim(trim((string)$routeMeta->path), '/'); // '' OK
-                $childC = $this->applyWhere($child, $effectiveWhere);
+                // Path building
+                $childRaw     = (string) $routeMeta->path; // '' | '/{id}' | '{id}'
+                $childWhere   = $this->applyWhere(ltrim($childRaw, '/'), $effectiveWhere);
+                $prettyFull   = $this->joinPath($groupPrefix, $childWhere); // "/api/users" or "/api/users/{id:\d+}"
+                $mappedPath   = $this->toMappable($prettyFull);             // "/api/users[/]" or "/api/users/{id:\d+}[/]"
 
-                // Map with optional trailing slash
-                $mappedPath = $this->normalizeChild($childC, $target instanceof RouteGroup);
-
+                // Handler (container aware)
                 $handler = [$this->resolveController($controller->getName()), $method->getName()];
-                $route   = $target->map($methods, $mappedPath, $handler);
+                $route   = $this->router->map($methods, $mappedPath, $handler);
 
+                // Name
                 if ($routeMeta->name) {
                     $route->setName(($namePrefix ?? '') . $routeMeta->name);
                 }
+
+                // Domain (if supported)
                 if ($effectiveDomain && \method_exists($route, 'setHost')) {
                     $route->setHost($effectiveDomain);
                 }
 
+                // Middlewares: class/group -> method @UseMiddleware -> route-meta middlewares
                 foreach ($classMiddlewares as $mw) {
                     $route->middleware($this->resolveMiddleware($mw));
                 }
@@ -271,6 +277,7 @@ final class RouterFactory
                     $route->middleware($this->resolveMiddleware($mw));
                 }
 
+                // Throttle
                 if ($effectiveThrottle) {
                     if (!$this->cache) {
                         throw new \RuntimeException('Throttle attribute used but no CacheInterface provided to RouterFactory.');
@@ -283,24 +290,22 @@ final class RouterFactory
                     ));
                 }
 
-                $effectivePath = ($target instanceof \League\Route\RouteGroup)
-                    ? $this->joinPath($groupPrefix, $childC) // $childC came from normalizeChild(...)
-                    : ($childC === '' || $childC === '/' ? '/'
-                        : '/' . ltrim(preg_replace('#\[/\]$#', '', $childC), '/'));
-
+                // Record pretty route for dump
                 $this->registry[] = [
                     'methods'    => $methods,
-                    'path'       => $effectivePath,
-                    'name'       => $fullName ?? null,
+                    'path'       => $prettyFull,
+                    'name'       => $routeMeta->name ? (($namePrefix ?? '') . $routeMeta->name) : null,
                     'controller' => $controller->getName(),
                     'action'     => $method->getName(),
-                    'domain'     => $effectiveDomain ?? null,
+                    'domain'     => $effectiveDomain,
                 ];
             }
         }
     }
 
-    // ---------- Fluent API ----------
+    // -------------------------------------------------
+    // Fluent API
+    // -------------------------------------------------
 
     public function fluent(): Fluent\RouteRegistrar
     {
@@ -310,10 +315,10 @@ final class RouterFactory
     /**
      * Low-level manual map used by the fluent layer.
      *
-     * @param array<int,string>|string $methods
-     * @param callable|array|string    $handler
-     * @param array<class-string|object> $middlewares
-     * @param array<string,string>|null $where
+     * @param array<int,string>|string    $methods
+     * @param callable|array|string       $handler  (callable or ["Class","method"])
+     * @param array<class-string|object>  $middlewares
+     * @param array<string,string>|null   $where
      * @param array{limit:int,per:int,key:string}|null $throttle
      */
     public function map(
@@ -334,9 +339,10 @@ final class RouterFactory
             throw new \InvalidArgumentException('map(): at least one HTTP method is required.');
         }
 
-        $child     = ltrim(trim($path), '/');              // '' ok
-        $childC    = $this->applyWhere($child, $where ?? []);
-        $mapped    = $this->normalizeChild($childC, false); // optional trailing slash
+        $child      = ltrim(trim($path), '/');                 // '' ok
+        $childWhere = $this->applyWhere($child, $where ?? []);
+        $pretty     = $this->joinPath('', $childWhere);        // top-level pretty path
+        $mapped     = $this->toMappable($pretty);
 
         // handler normalization
         $controllerName = null;
@@ -355,6 +361,7 @@ final class RouterFactory
         if ($domain && \method_exists($route, 'setHost')) {
             $route->setHost($domain);
         }
+
         foreach ($middlewares as $mw) {
             $route->middleware($this->resolveMiddleware($mw));
         }
@@ -363,7 +370,7 @@ final class RouterFactory
             if (!$this->cache) {
                 throw new \RuntimeException('map(): throttle provided but CacheInterface not set.');
             }
-            $route->middleware(new \Marwa\Router\Middleware\ThrottleMiddleware(
+            $route->middleware(new ThrottleMiddleware(
                 $this->cache,
                 (int)$throttle['limit'],
                 (int)$throttle['per'],
@@ -371,9 +378,10 @@ final class RouterFactory
             ));
         }
 
+        // Record pretty path (no FastRoute tokens)
         $this->registry[] = [
             'methods'    => $finalMethods,
-            'path'       => ($childC === '' ? '/' : '/' . $childC),
+            'path'       => $pretty === '' ? '/' : $pretty,
             'name'       => $name,
             'controller' => $controllerName,
             'action'     => $actionName,
@@ -383,7 +391,9 @@ final class RouterFactory
         return $this;
     }
 
-    // ---------- Helpers ----------
+    // -------------------------------------------------
+    // Helpers
+    // -------------------------------------------------
 
     private function resolveController(string $class): object
     {
@@ -398,57 +408,40 @@ final class RouterFactory
         if ($this->container && $this->container->has($mw)) return $this->container->get($mw);
         return new $mw();
     }
+
+    /** Pretty join: "/api/users" + "" => "/api/users"; + "{id:\d+}" => "/api/users/{id:\d+}" */
     private function joinPath(string $base, string $child): string
     {
-        // canonical base "/api/users"
         $base  = '/' . ltrim(trim($base), '/');
-        $base  = rtrim($base, '/');
-
-        $child = trim($child);
-
-        // group root or optional-root token -> just the base
-        if ($child === '' || $child === '/' || $child === '[/]') {
-            return $base;
-        }
-
-        // strip FastRoute optional token for display
-        $prettyChild = preg_replace('#\[/\]$#', '', $child);
-        $prettyChild = '/' . ltrim($prettyChild, '/');
-
-        return $base . $prettyChild;
+        $base  = rtrim($base, '/'); // canonical
+        $child = ltrim(trim($child), '/');
+        return $child === '' ? ($base === '' ? '/' : $base) : ($base === '' ? '/' . $child : $base . '/' . $child);
     }
 
-
-    private function normalizeChild(string $raw, bool $inGroup): string
+    /** Convert pretty path to FastRoute pattern with optional trailing slash if enabled. */
+    private function toMappable(string $pretty): string
     {
-        $raw = trim($raw);
-
-        if ($inGroup) {
-            // root of the group: match both /group and /group/
-            if ($raw === '' || $raw === '/') {
-                return $this->trailingSlashOptional ? '[/]' : '';
-            }
-            $path = '/' . ltrim($raw, '/');
-            return $this->trailingSlashOptional ? rtrim($path, '/') . '[/]' : $path;
-        }
-
-        // top level
-        if ($raw === '' || $raw === '/') {
+        if ($pretty === '' || $pretty === '/') {
             return '/';
         }
-        $path = '/' . ltrim($raw, '/');
-        return $this->trailingSlashOptional ? rtrim($path, '/') . '[/]' : $path;
+        $pretty = '/' . ltrim($pretty, '/');
+        if ($this->trailingSlashOptional) {
+            return rtrim($pretty, '/') . '[/]';
+        }
+        return $pretty;
     }
 
-
-    /** Inject {param:regex} constraints unless already present. */
+    /** Apply {param:regex} constraints unless already present. */
     private function applyWhere(string $childPath, array $constraints): string
     {
         if ($childPath === '' || empty($constraints)) return $childPath;
+
         return \preg_replace_callback('/\{([a-zA-Z_][a-zA-Z0-9_]*)(?::[^}]+)?\}/', function ($m) use ($constraints) {
             $name = $m[1];
-            $has = \str_contains($m[0], ':');
-            if ($has || !isset($constraints[$name])) return $m[0];
+            // if already has a regex ( {name:...} ), keep it
+            if (\str_contains($m[0], ':') || !isset($constraints[$name])) {
+                return $m[0];
+            }
             return '{' . $name . ':' . $constraints[$name] . '}';
         }, $childPath) ?? $childPath;
     }
@@ -490,5 +483,11 @@ final class RouterFactory
             $out[$w->param] = $w->pattern;
         }
         return $out;
+    }
+
+    private function normalizePrefix(string $p): string
+    {
+        $p = '/' . ltrim(trim($p), '/');
+        return rtrim($p, '/');
     }
 }

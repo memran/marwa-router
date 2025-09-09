@@ -61,24 +61,24 @@ $cache = new class implements CacheInterface {
 
 //$cache = new FilesystemCache(__DIR__ . '/storage/cache/');
 
-$app = new RouterFactory(cache: $cache);
+$app = new RouterFactory();
 
 // 1) Annotation scan (optional)
 $app->registerFromDirectories([__DIR__ . '/Controllers']);
 
-// 2) Manual (Laravel-like) routes
-// $app->fluent()->group(['prefix' => '/api', 'name' => 'api.'], function ($r) {
-//     // GET /api/hello  (also matches /api/hello/)
-//     $r->get('/hello', fn() => new JsonResponse(['hi' => 'there']))
-//         ->name('hello')
-//         ->register();
+//2) Manual routes
+$app->fluent()->group(['prefix' => '/api', 'name' => 'api.'], function ($r) {
+    // GET /api/hello  (also matches /api/hello/)
+    $r->get('/hello', fn() => new JsonResponse(['hi' => 'there']))
+        ->name('hello')
+        ->register();
 
-//     // GET /api/users/{id}  (also /api/users/{id}/)
-//     $r->get('/users/{id}', fn($req) => new JsonResponse(['id' => (int)($req->getAttribute('id') ?? 0)]))
-//         ->name('users.show')
-//         ->where('id', '\d+')
-//         ->register();
-// });
+    // GET /api/users/{id}  (also /api/users/{id}/)
+    $r->get('/users/{id}', fn($req) => new JsonResponse(['id' => (int)($req->getAttribute('id') ?? 0)]))
+        ->name('users.show')
+        ->where('id', '\d+')
+        ->register();
+});
 
 
 // Run app (reads globals, dispatches, emits)
