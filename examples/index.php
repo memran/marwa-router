@@ -1,41 +1,83 @@
 <?php
 
 declare(strict_types=1);
-
-use Laminas\Diactoros\ResponseFactory;
-use Laminas\Diactoros\ServerRequestFactory;
-use Laminas\HttpHandlerRunner\Emitter\SapiEmitter;
-use League\Route\Strategy\ApplicationStrategy;
-use Marwa\Router\RouterFactory;
-
 require __DIR__ . '/../vendor/autoload.php';
 
-$factory = new RouterFactory();
 
-// point to your controllers folder (adjust if needed)
-$factory->registerFromDirectories([__DIR__ . '\Controllers']);
+use Marwa\Router\RouterFactory;
+use Psr\SimpleCache\CacheInterface;
+use Laminas\Diactoros\Response\JsonResponse;
+// Use any PSR-16 cache implementation you like.
+// Example: symfony/cache PSR-16 adapter, or your own.
+$cache = new class implements CacheInterface {
+    private array $s = [];
+    public function get($key, $default = null): mixed
+    {
+        return $this->s[$key][0] ?? $default;
+    }
+    public function set($key, $value, $ttl = null): bool
+    {
+        $this->s[$key] = [$value, time() + (is_int($ttl) ? $ttl : 60)];
+        return true;
+    }
+    public function delete($key): bool
+    {
+        unset($this->s[$key]);
+        return true;
+    }
+    public function clear(): bool
+    {
+        $this->s = [];
+        return true;
+    }
+    public function getMultiple($keys, $default = null): iterable
+    {
+        $out = [];
+        foreach ($keys as $k) {
+            $out[$k] = $this->get($k, $default);
+        }
+        return $out;
+    }
+    public function setMultiple($values, $ttl = null): bool
+    {
+        foreach ($values as $k => $v) {
+            $this->set($k, $v, $ttl);
+        }
+        return true;
+    }
+    public function deleteMultiple($keys): bool
+    {
+        foreach ($keys as $k) {
+            $this->delete($k);
+        }
+        return true;
+    }
+    public function has($key): bool
+    {
+        return array_key_exists($key, $this->s);
+    }
+};
 
-$router = $factory->getRouter();
+//$cache = new FilesystemCache(__DIR__ . '/storage/cache/');
 
-// ✅ set a strategy with a PSR-17 response factory
-$strategy = (new ApplicationStrategy(new ResponseFactory()));
+$app = new RouterFactory(cache: $cache);
 
-$router->setStrategy($strategy);
+// 1) Annotation scan (optional)
+$app->registerFromDirectories([__DIR__ . '/Controllers']);
 
-// Build request and dispatch
-$request  = ServerRequestFactory::fromGlobals();
-$response = $router->dispatch($request);
+// 2) Manual (Laravel-like) routes
+// $app->fluent()->group(['prefix' => '/api', 'name' => 'api.'], function ($r) {
+//     // GET /api/hello  (also matches /api/hello/)
+//     $r->get('/hello', fn() => new JsonResponse(['hi' => 'there']))
+//         ->name('hello')
+//         ->register();
 
-// Emit response
-(new SapiEmitter())->emit($response);
+//     // GET /api/users/{id}  (also /api/users/{id}/)
+//     $r->get('/users/{id}', fn($req) => new JsonResponse(['id' => (int)($req->getAttribute('id') ?? 0)]))
+//         ->name('users.show')
+//         ->where('id', '\d+')
+//         ->register();
+// });
 
-
-/*examples/index.php (prod fast path)
-$factory = new RouterFactory();
-$cache = __DIR__ . '/../var/cache/routes.php';
-if (is_file($cache)) {
-    $factory->registerFromRegistry(require $cache);
-} else {
-    $factory->registerFromDirectories([__DIR__ . '/controllers']);
-}
-*/
+// Run app (reads globals, dispatches, emits)
+$app->run();
