@@ -6,7 +6,6 @@ namespace Marwa\Router;
 
 use League\Route\Router as LeagueRouter;
 use League\Route\RouteGroup;
-use League\Route\Strategy\ApplicationStrategy;
 use Marwa\Router\Attributes\{
     Prefix,
     Route as RouteAttr,
@@ -19,6 +18,7 @@ use Marwa\Router\Attributes\{
 use Marwa\Router\Exceptions\InvalidRouteDefinitionException;
 use Marwa\Router\Middleware\ThrottleMiddleware;
 use Marwa\Router\Support\ClassLocator;
+use Marwa\Router\Strategy\HtmlStrategy;
 use Psr\Container\ContainerInterface;
 use Psr\Http\Message\{ResponseFactoryInterface, ResponseInterface, ServerRequestInterface};
 use Laminas\Diactoros\ResponseFactory;
@@ -27,9 +27,11 @@ use ReflectionAttribute;
 use ReflectionClass;
 use ReflectionMethod;
 use Psr\SimpleCache\CacheInterface;
+use League\Route\Strategy\StrategyInterface;
 
 final class RouterFactory
 {
+
     /** @var array<int, array{methods:array<int,string>,path:string,name:?string,controller:?string,action:?string,domain:?string}> */
     private array $registry = [];
 
@@ -40,6 +42,10 @@ final class RouterFactory
 
     /** If true, every route matches with and without a trailing slash. */
     private bool $trailingSlashOptional = true;
+
+
+    // store the strategy when you set it (if you aren’t already)
+    private ?StrategyInterface $strategy = null;
 
     public function __construct(
         ?ContainerInterface $container = null,
@@ -52,8 +58,31 @@ final class RouterFactory
         $this->cache           = $cache;
         $this->router          = $router ?? new LeagueRouter();
 
-        $strategy = new ApplicationStrategy($this->responseFactory);
+        $this->useStrategy(new HtmlStrategy($this->responseFactory)); // default text/html
+    }
+
+    public function useStrategy(StrategyInterface $strategy): self
+    {
+        if (method_exists($strategy, 'setContainer') && $this->container) {
+            $strategy->setContainer($this->container);
+        }
+        $this->strategy = $strategy;
         $this->router->setStrategy($strategy);
+        return $this;
+    }
+
+    /**
+     * Allow app code to provide a custom 404 renderer without touching League.
+     * Works for strategies that implement CustomNotFoundTrait.
+     *
+     * @param callable|\Psr\Http\Server\RequestHandlerInterface $handler
+     */
+    public function setNotFoundHandler($handler): self
+    {
+        if ($this->strategy && method_exists($this->strategy, 'setNotFoundHandler')) {
+            $this->strategy->setNotFoundHandler($handler);
+        }
+        return $this;
     }
 
     /** Optionally disable/enable optional trailing slash matching. */
@@ -96,12 +125,22 @@ final class RouterFactory
     /** @param string[] $controllerDirs */
     public function registerFromDirectories(array $controllerDirs, bool $strict = false): self
     {
-        $classes = ClassLocator::loadAndCollectClasses(fn() => ClassLocator::requirePhpFiles($controllerDirs, $strict));
+        $classes = ClassLocator::loadAndCollectClasses(
+            fn() => ClassLocator::requirePhpFiles($controllerDirs, $strict),
+            $controllerDirs
+        );
+
         if (empty($classes)) {
             $list = implode(', ', array_map(static fn($p) => rtrim($p, "\\/"), $controllerDirs));
             throw new \RuntimeException("No classes discovered under: {$list}");
         }
         return $this->registerFromClasses($classes);
+    }
+
+    private function normalizePrefix(string $p): string
+    {
+        $p = '/' . ltrim(trim($p), '/');
+        return rtrim($p, '/'); // store canonical without trailing slash
     }
 
     /** @param array<class-string> $classNames */
@@ -118,7 +157,9 @@ final class RouterFactory
             $domainCtrl    = $this->firstAttr($ref, DomainAttr::class)?->newInstance()->host ?? null;
             $throttleClass = $this->firstAttr($ref, ThrottleAttr::class)?->newInstance();
 
-            $prefixPath = $prefixAttr->path ?? '';
+            //$prefixPath = $prefixAttr->path ?? '';
+            //$namePrefix = $prefixAttr->name ?? null;
+            $prefixPath = isset($prefixAttr->path) ? $this->normalizePrefix($prefixAttr->path) : '';
             $namePrefix = $prefixAttr->name ?? null;
 
             if ($prefixPath) {
@@ -242,17 +283,18 @@ final class RouterFactory
                     ));
                 }
 
-                $effectivePath = ($target instanceof RouteGroup)
-                    ? $this->joinPath($groupPrefix, $childC)
-                    : ($childC === '' ? '/' : '/' . $childC);
+                $effectivePath = ($target instanceof \League\Route\RouteGroup)
+                    ? $this->joinPath($groupPrefix, $childC) // $childC came from normalizeChild(...)
+                    : ($childC === '' || $childC === '/' ? '/'
+                        : '/' . ltrim(preg_replace('#\[/\]$#', '', $childC), '/'));
 
                 $this->registry[] = [
                     'methods'    => $methods,
                     'path'       => $effectivePath,
-                    'name'       => $routeMeta->name ? (($namePrefix ?? '') . $routeMeta->name) : null,
+                    'name'       => $fullName ?? null,
                     'controller' => $controller->getName(),
                     'action'     => $method->getName(),
-                    'domain'     => $effectiveDomain,
+                    'domain'     => $effectiveDomain ?? null,
                 ];
             }
         }
@@ -356,38 +398,48 @@ final class RouterFactory
         if ($this->container && $this->container->has($mw)) return $this->container->get($mw);
         return new $mw();
     }
-
     private function joinPath(string $base, string $child): string
     {
+        // canonical base "/api/users"
         $base  = '/' . ltrim(trim($base), '/');
-        $child = ltrim(trim($child), '/');
-        if ($child === '') return $base === '//' ? '/' : $base;
-        return rtrim($base, '/') . '/' . $child;
+        $base  = rtrim($base, '/');
+
+        $child = trim($child);
+
+        // group root or optional-root token -> just the base
+        if ($child === '' || $child === '/' || $child === '[/]') {
+            return $base;
+        }
+
+        // strip FastRoute optional token for display
+        $prettyChild = preg_replace('#\[/\]$#', '', $child);
+        $prettyChild = '/' . ltrim($prettyChild, '/');
+
+        return $base . $prettyChild;
     }
 
-    /**
-     * Turn a child path into a mappable pattern.
-     * If $this->trailingSlashOptional is true:
-     *   '/foo' becomes '/foo[/]' and group-root '' becomes '[/]' (so '/group' and '/group/' work).
-     */
+
     private function normalizeChild(string $raw, bool $inGroup): string
     {
         $raw = trim($raw);
-        if ($raw === '') {
-            // Root route
-            return $inGroup
-                ? ($this->trailingSlashOptional ? '[/]' : '')   // inside group: '' or '[/]'
-                : '/';                                          // top-level root: just '/'
+
+        if ($inGroup) {
+            // root of the group: match both /group and /group/
+            if ($raw === '' || $raw === '/') {
+                return $this->trailingSlashOptional ? '[/]' : '';
+            }
+            $path = '/' . ltrim($raw, '/');
+            return $this->trailingSlashOptional ? rtrim($path, '/') . '[/]' : $path;
         }
 
+        // top level
+        if ($raw === '' || $raw === '/') {
+            return '/';
+        }
         $path = '/' . ltrim($raw, '/');
-
-        if ($this->trailingSlashOptional) {
-            $path = rtrim($path, '/');
-            return $path . '[/]';
-        }
-        return $path;
+        return $this->trailingSlashOptional ? rtrim($path, '/') . '[/]' : $path;
     }
+
 
     /** Inject {param:regex} constraints unless already present. */
     private function applyWhere(string $childPath, array $constraints): string

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Examples\Controllers;
 
 use Laminas\Diactoros\Response\JsonResponse;
+use Marwa\Router\Attributes\Prefix;
 use Marwa\Router\Attributes\Route;
 use Psr\Http\Message\ServerRequestInterface;
 

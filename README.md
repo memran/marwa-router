@@ -1,13 +1,15 @@
 # Marwa Router
 
-Attribute-driven router on top of **league/route**.  
-Scan your controller classes, discover PHP 8 attributes, and auto-register routes.
+Attribute-driven routing and a fluent, Laravel-style API on top of league/route — with zero League exposure in your app code.
 
-- 💡 **PHP 8 Attributes** (native, no Doctrine)
-- 🧭 **Controller Prefix** + name prefix
-- 🧱 **PSR-15 Middlewares** at class & method level
-- 🧰 Optional **PSR-11 Container** to resolve controllers/middlewares
-- 🗂️ Scan directories or register explicit class lists
+- ✅ PHP 8 Attributes (native) — `#[Route]`, `#[Prefix]`, `#[UseMiddleware]`, `#[GroupMiddleware]`, `#[Where]`, `#[Domain]`, `#[Throttle]`
+- ✅ Fluent manual routes (`$app->fluent()->get(...)->name(...)->middleware(...)->register()`)
+- ✅ Optional trailing slash matching (`/foo` and `/foo/`)
+- ✅ PSR-15 middlewares (class & method level)
+- ✅ PSR-16 throttle middleware (Redis/Filesystem/Array cache)
+- ✅ Domain binding and param constraints
+- ✅ Custom Not Found handler
+- ✅ Route registry & `bin/routes-dump`
 
 ## Install
 

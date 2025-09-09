@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 require __DIR__ . '/../vendor/autoload.php';
+$startTime  = microtime(true);
 
 
 use Marwa\Router\RouterFactory;
@@ -79,5 +80,8 @@ $app->registerFromDirectories([__DIR__ . '/Controllers']);
 //         ->register();
 // });
 
+
 // Run app (reads globals, dispatches, emits)
 $app->run();
+$executionTime = microtime(true) - $startTime;
+echo "<pre>Script executed in: " . number_format($executionTime, 4) . " seconds</pre>";

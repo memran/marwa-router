@@ -5,29 +5,21 @@ declare(strict_types=1);
 namespace Examples\Controllers;
 
 use Laminas\Diactoros\Response\JsonResponse;
-use Marwa\Router\Attributes\Prefix;
-use Marwa\Router\Attributes\Route;
-use Psr\Http\Message\ServerRequestInterface;
+use Marwa\Router\Attributes\{Prefix, Route, Where};
 
-#[Prefix('/api/users', name: 'users.')]
+#[\Marwa\Router\Attributes\Prefix('/api/users', name: 'users.')]
+#[\Marwa\Router\Attributes\Where('id', '\d+')]
 final class UserController
 {
-    #[Route('GET', '/', name: 'index')]
-    public function index(ServerRequestInterface $request): JsonResponse
+    #[\Marwa\Router\Attributes\Route('GET', '', name: 'index')]
+    public function index()
     {
-        return new JsonResponse(['ok' => true, 'users' => []]);
+        return 'OK';
     }
 
-    #[Route('GET', '/{id:\d+}', name: 'show')]
-    public function show(ServerRequestInterface $request, array $args): JsonResponse
+    #[\Marwa\Router\Attributes\Route('GET', '/{id}', name: 'show')]
+    public function show($req, array $args)
     {
-        return new JsonResponse(['id' => (int)($args['id'] ?? 0)]);
-    }
-
-    #[Route('POST', '', name: 'create')]
-    public function create(ServerRequestInterface $request): JsonResponse
-    {
-        // $data = $request->getParsedBody();
-        return new JsonResponse(['created' => true], 201);
+        return 'User ' . $args['id'];
     }
 }
