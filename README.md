@@ -34,7 +34,6 @@ require __DIR__ . '/../vendor/autoload.php';
 $app = new RouterFactory();
 
 $app->fluent()->get('/', fn() => 'ok')->name('hello')->register();
-$app->run();
 
 // Fluent routes (optional)
 $app->fluent()->group(['prefix' => '/api', 'name' => 'api.'], function ($r) {
