@@ -35,4 +35,19 @@ final class UrlGenerator
         }
         throw new \RuntimeException("Route not found by name: {$name}");
     }
+    public function signed(string $name, array $params, int $ttl, string $key): string
+    {
+        $url = $this->for($name, $params);
+        $exp = time() + $ttl;
+        $sig = hash_hmac('sha256', $url . $exp, $key);
+        return $url . (str_contains($url, '?') ? '&' : '?') . "exp=$exp&sig=$sig";
+    }
+    public function verify(string $url, string $key): bool
+    {
+        parse_str(parse_url($url, PHP_URL_QUERY) ?? '', $q);
+        if (empty($q['exp']) || empty($q['sig']) || time() > (int)$q['exp']) return false;
+        $base = strtok($url, '?');
+        $reUrl = $base . '?' . http_build_query(array_diff_key($q, ['sig' => 1]));
+        return hash_equals($q['sig'], hash_hmac('sha256', $reUrl . $q['exp'], $key));
+    }
 }

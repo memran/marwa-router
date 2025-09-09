@@ -67,6 +67,7 @@ $app = new RouterFactory();
 $app->registerFromDirectories([__DIR__ . '/Controllers']);
 
 //2) Manual routes
+
 // $app->fluent()->group(['prefix' => '/api', 'name' => 'api.'], function ($r) {
 //     // GET /api/hello  (also matches /api/hello/)
 //     $r->get('/hello', fn() => new JsonResponse(['hi' => 'there']))

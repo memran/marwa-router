@@ -4,3 +4,4 @@ storage/*.log
 /.idea/
 .env
 .env.*.local
+var/*

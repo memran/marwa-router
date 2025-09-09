@@ -16,10 +16,12 @@ use Marwa\Router\Attributes\{
     Throttle as ThrottleAttr
 };
 use Marwa\Router\Exceptions\InvalidRouteDefinitionException;
+use Marwa\Router\Exceptions\RouteConflictException;
 use Marwa\Router\Middleware\ThrottleMiddleware;
 use Marwa\Router\Support\ClassLocator;
 use Marwa\Router\Strategy\HtmlStrategy;
 use Marwa\Router\Strategy\JsonStrategy;
+
 use Psr\Container\ContainerInterface;
 use Psr\Http\Message\{ResponseFactoryInterface, ResponseInterface, ServerRequestInterface};
 use Psr\SimpleCache\CacheInterface;
@@ -44,6 +46,13 @@ final class RouterFactory
     private ?ContainerInterface $container;
     private ResponseFactoryInterface $responseFactory;
     private ?CacheInterface $cache;
+
+    /** @var array<string,true> */
+    private array $seenRouteKeys = [];
+    /** @var array<string,true> */
+    private array $seenNames = [];
+    /** Enable/disable conflict detection */
+    private bool $detectConflicts = true;
 
     /** If true, every route matches with and without a trailing slash. */
     private bool $trailingSlashOptional = true;
@@ -111,7 +120,29 @@ final class RouterFactory
         return $this->useStrategy(new JsonStrategy($this->responseFactory, $jsonFlags));
     }
 
+    /**
+     *  stores route cache
+     */
+    public function cacheRoutesTo(string $file): void
+    {
+        file_put_contents($file, '<?php return ' . var_export($this->routes(), true) . ';');
+    }
 
+    /**
+     * load route cache
+     */
+    public function loadRoutesFrom(string $file): bool
+    {
+        if (!is_file($file)) return false;
+        $this->registry = require $file;
+        return true;
+    }
+
+    public function enableConflictDetection(bool $on = true): self
+    {
+        $this->detectConflicts = $on;
+        return $this;
+    }
     /**
      * Allow app code to set a custom 404 renderer on strategies that support it
      * (i.e., have setNotFoundHandler() method via a shared trait).
@@ -252,6 +283,9 @@ final class RouterFactory
                 $prettyFull   = $this->joinPath($groupPrefix, $childWhere); // "/api/users" or "/api/users/{id:\d+}"
                 $mappedPath   = $this->toMappable($prettyFull);             // "/api/users[/]" or "/api/users/{id:\d+}[/]"
 
+                $this->assertUniqueRoute($methods, $prettyFull, $effectiveDomain);
+                $this->assertUniqueName($routeMeta->name ? (($namePrefix ?? '') . $routeMeta->name) : null);
+
                 // Handler (container aware)
                 $handler = [$this->resolveController($controller->getName()), $method->getName()];
                 $route   = $this->router->map($methods, $mappedPath, $handler);
@@ -353,6 +387,9 @@ final class RouterFactory
             $actionName = $handler[1];
             $callable = [$this->resolveController($controllerName), $actionName];
         }
+
+        $this->assertUniqueRoute($finalMethods, $pretty === '' ? '/' : $pretty, $domain);
+        $this->assertUniqueName($name);
 
         $route = $this->router->map($finalMethods, $mapped, $callable);
         if ($name) {
@@ -489,5 +526,48 @@ final class RouterFactory
     {
         $p = '/' . ltrim(trim($p), '/');
         return rtrim($p, '/');
+    }
+
+    /**
+     * Ensure {METHOD, domain, path} is unique.
+     * @param array<int,string> $methods
+     */
+    private function assertUniqueRoute(array $methods, string $prettyPath, ?string $domain): void
+    {
+        if (!$this->detectConflicts) return;
+
+        $path = $this->canonicalPath($prettyPath);
+        $host = $this->canonicalDomain($domain);
+
+        foreach ($methods as $m) {
+            $method = strtoupper($m);
+            $key = "{$method}|{$host}|{$path}";
+            if (isset($this->seenRouteKeys[$key])) {
+                throw new RouteConflictException("Duplicate route: {$method} {$path} (domain: {$host})");
+            }
+            $this->seenRouteKeys[$key] = true;
+        }
+    }
+
+    /** Ensure route names are unique (if provided). */
+    private function assertUniqueName(?string $name): void
+    {
+        if (!$this->detectConflicts || $name === null || $name === '') return;
+
+        if (isset($this->seenNames[$name])) {
+            throw new RouteConflictException("Duplicate route name: {$name}");
+        }
+        $this->seenNames[$name] = true;
+    }
+    private function canonicalPath(string $pretty): string
+    {
+        // ensure single leading slash, strip trailing slash (except root)
+        $p = '/' . ltrim($pretty, '/');
+        return $p === '/' ? '/' : rtrim($p, '/');
+    }
+
+    private function canonicalDomain(?string $domain): string
+    {
+        return $domain === null || $domain === '' ? '*' : strtolower($domain);
     }
 }
