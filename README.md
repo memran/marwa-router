@@ -33,10 +33,8 @@ require __DIR__ . '/../vendor/autoload.php';
 
 $app = new RouterFactory();
 
-// Strategy (choose one)
-// $app->useHtmlStrategy(); // default
-// $app->useJsonStrategy(JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-// $app->useTextStrategy();
+$app->fluent()->get('/', fn() => 'ok')->name('hello')->register();
+$app->run();
 
 // Fluent routes (optional)
 $app->fluent()->group(['prefix' => '/api', 'name' => 'api.'], function ($r) {
@@ -46,7 +44,7 @@ $app->fluent()->group(['prefix' => '/api', 'name' => 'api.'], function ($r) {
 });
 
 // Attribute scan : optional (point this at your controllers folder)
-$app->registerFromDirectories([__DIR__ . '/controllers'], strict: true);
+//$app->registerFromDirectories([__DIR__ . '/controllers'], strict: true);
 
 // Custom 404 (optional; strategy wraps strings/arrays accordingly)
 $app->setNotFoundHandler(fn($req) =>

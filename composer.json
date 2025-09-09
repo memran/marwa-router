@@ -2,9 +2,9 @@
   "name": "memran/marwa-router",
   "description": "Attribute + fluent routing over league/route with PSR-7/15/16 support.",
   "type": "library",
-  "keywords": ["router","routing","league/route","php8-attributes","psr-7","psr-15","psr-16"],
+  "keywords": ["router","routing","league-route","php8-attributes","psr-7","psr-15","psr-16"],
   "license": "MIT",
-  "authors": [{ "name": "memran", "role": "Maintainer" }],
+  "authors": [{ "name": "Mohammad Emran", "role": "Maintainer" }],
   "require": {
     "php": "^8.1",
     "league/route": "^6.2",
