@@ -1,6 +1,6 @@
 # Marwa Router
 
-Attribute-driven routing and a fluent, Laravel-style API on top of league/route — with zero League exposure in your app code.
+Attribute-driven routing and a fluent API on top of league/route.
 
 - ✅ PHP 8 Attributes (native) — `#[Route]`, `#[Prefix]`, `#[UseMiddleware]`, `#[GroupMiddleware]`, `#[Where]`, `#[Domain]`, `#[Throttle]`
 - ✅ Fluent manual routes (`$app->fluent()->get(...)->name(...)->middleware(...)->register()`)
