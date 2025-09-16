@@ -1,4 +1,8 @@
 # Marwa Router
+![License](https://img.shields.io/github/license/memran/marwa-router)
+[![Total Downloads](https://img.shields.io/packagist/dt/memran/marwa-router.svg?style=flat-square)](https://packagist.org/packages/memran/marwa-router)
+![PHP Version](https://img.shields.io/badge/PHP-8.1+-blue)
+
 
 Attribute-driven routing and a fluent API on top of league/route.
 
