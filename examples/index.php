@@ -81,6 +81,9 @@ $app->registerFromDirectories([__DIR__ . '/Controllers']);
 // });
 
 // Run app (reads globals, dispatches, emits)
+$app->setNotFoundHandler(function ($req){
+    return Response::text("Route Not Found");
+});
 $app->run();
 
 /**

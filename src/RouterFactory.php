@@ -1,9 +1,12 @@
-<?php declare(strict_types=1);
+<?php
+
+declare(strict_types=1);
 
 namespace Marwa\Router;
 
+use Exception;
 use League\Route\Router as LeagueRouter;
-use League\Route\Strategy\StrategyInterface;
+use League\Route\Strategy\ApplicationStrategy;
 use Marwa\Router\Attributes\{
     Prefix,
     Route as RouteAttr,
@@ -17,8 +20,6 @@ use Marwa\Router\Exceptions\InvalidRouteDefinitionException;
 use Marwa\Router\Exceptions\RouteConflictException;
 use Marwa\Router\Middleware\ThrottleMiddleware;
 use Marwa\Router\Support\ClassLocator;
-use Marwa\Router\Strategy\HtmlStrategy;
-use Marwa\Router\Strategy\JsonStrategy;
 
 use Psr\Container\ContainerInterface;
 use Psr\Http\Message\{ResponseFactoryInterface, ResponseInterface, ServerRequestInterface};
@@ -31,6 +32,7 @@ use ReflectionMethod;
 use Laminas\Diactoros\ResponseFactory;
 use Laminas\Diactoros\ServerRequestFactory;
 use Laminas\HttpHandlerRunner\Emitter\SapiEmitter;
+use League\Route\Http\Exception\NotFoundException;
 
 final class RouterFactory
 {
@@ -39,7 +41,7 @@ final class RouterFactory
     private array $registry = [];
 
     private LeagueRouter $router;
-    private ?StrategyInterface $strategy = null;
+    private $strategy = null;
 
     private ?ContainerInterface $container;
     private ResponseFactoryInterface $responseFactory;
@@ -55,6 +57,9 @@ final class RouterFactory
     /** If true, every route matches with and without a trailing slash. */
     private bool $trailingSlashOptional = true;
 
+    /* Not found Hanlder */
+    private $notFoundHandler = null;
+
     /**
      * Router Fatory constructor 
      */
@@ -64,19 +69,27 @@ final class RouterFactory
         ?CacheInterface $cache = null,
         ?LeagueRouter $router = null
     ) {
-        $this->container       = $container;
         $this->responseFactory = $responseFactory ?? new ResponseFactory();
         $this->cache           = $cache;
         $this->router          = $router ?? new LeagueRouter();
-
-        // Default strategy: HTML
-        $this->useHtmlStrategy();
+        $this->container       = $container;
+        if (!is_null($this->container)) {
+            $this->setContainer($container);
+        }
     }
 
     // -------------------------------------------------
     // Public API
     // -------------------------------------------------
+    public function setContainer(ContainerInterface $container): self
+    {
+        $this->container = $container;
+        $this->strategy = new ApplicationStrategy();
+        $this->strategy->setContainer($this->container);
+        $this->router->setStrategy($this->strategy);
 
+        return $this;
+    }
     /** Toggle optional trailing slash matching globally. */
     public function setTrailingSlashOptional(bool $on): self
     {
@@ -84,41 +97,10 @@ final class RouterFactory
         return $this;
     }
 
-    public function setContainer(ContainerInterface $container): self
-    {
-        $this->container = $container;
-        // reattach container if strategy supports it
-        if ($this->strategy && method_exists($this->strategy, 'setContainer')) {
-            $this->strategy->setContainer($container);
-        }
-        return $this;
-    }
-
     public function setCache(CacheInterface $cache): self
     {
         $this->cache = $cache;
         return $this;
-    }
-
-    /** Replace the internal League strategy (Html/Json/Text or custom). */
-    public function useStrategy(StrategyInterface $strategy): self
-    {
-        if (method_exists($strategy, 'setContainer') && $this->container) {
-            $strategy->setContainer($this->container);
-        }
-        $this->strategy = $strategy;
-        $this->router->setStrategy($strategy);
-        return $this;
-    }
-
-    public function useHtmlStrategy(): self
-    {
-        return $this->useStrategy(new HtmlStrategy($this->responseFactory));
-    }
-
-    public function useJsonStrategy(int $jsonFlags = 0): self
-    {
-        return $this->useStrategy(new JsonStrategy($this->responseFactory, $jsonFlags));
     }
 
     /**
@@ -150,11 +132,9 @@ final class RouterFactory
      *
      * @param callable|\Psr\Http\Server\RequestHandlerInterface $handler
      */
-    public function setNotFoundHandler($handler): self
+    public function setNotFoundHandler(callable $handler): self
     {
-        if ($this->strategy && \method_exists($this->strategy, 'setNotFoundHandler')) {
-            $this->strategy->setNotFoundHandler($handler);
-        }
+        $this->notFoundHandler = $handler;
         return $this;
     }
 
@@ -167,9 +147,18 @@ final class RouterFactory
     /** Convenience for SAPI usage (Diactoros ServerRequest + SapiEmitter). */
     public function run(): void
     {
-        $request  = ServerRequestFactory::fromGlobals();
-        $response = $this->dispatch($request);
-        (new SapiEmitter())->emit($response);
+        try {
+            $request  = ServerRequestFactory::fromGlobals();
+            $response = $this->dispatch($request);
+            (new SapiEmitter())->emit($response);
+        } catch (NotFoundException $e) {
+            if (is_null($this->notFoundHandler)) {
+                throw new Exception("Route Not Found");
+            } else {
+                $response = call_user_func_array($this->notFoundHandler, [$request]);
+                (new SapiEmitter())->emit($response);
+            }
+        }
     }
 
     /** Expose the route table for dump/debug. */
@@ -444,7 +433,7 @@ final class RouterFactory
     {
         if (\is_object($mw)) return $mw;
         if ($this->container && $this->container->has($mw)) return $this->container->get($mw);
-        
+
         return new $mw();
     }
 
