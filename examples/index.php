@@ -81,8 +81,22 @@ $app->registerFromDirectories([__DIR__ . '/Controllers']);
 //         ->register();
 // });
 
-
 // Run app (reads globals, dispatches, emits)
 $app->run();
-$executionTime = microtime(true) - $startTime;
-echo "<pre>Script executed in: " . number_format($executionTime, 4) . " seconds</pre>";
+
+/**
+ *  URL generator
+ */
+// $urls = new \Marwa\Router\UrlGenerator($app->routes());
+// //$show = $urls->for('users.show', ['id' => 42]); // -> /api/users/42
+// $encString=$urls->signed('users.show', ['id' => 42], 300, "test");
+// var_dump($encString);
+// if($urls->verify($encString,"test")){
+//     var_dump("URL is verified");
+// }else {
+//      var_dump("URL is not valid");
+// }
+
+
+// $executionTime = microtime(true) - $startTime;
+// echo "<pre>Script executed in: " . number_format($executionTime, 4) . " seconds</pre>";

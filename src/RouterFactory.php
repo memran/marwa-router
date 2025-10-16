@@ -1,6 +1,4 @@
-<?php
-
-declare(strict_types=1);
+<?php declare(strict_types=1);
 
 namespace Marwa\Router;
 
@@ -57,6 +55,9 @@ final class RouterFactory
     /** If true, every route matches with and without a trailing slash. */
     private bool $trailingSlashOptional = true;
 
+    /**
+     * Router Fatory constructor 
+     */
     public function __construct(
         ?ContainerInterface $container = null,
         ?ResponseFactoryInterface $responseFactory = null,
@@ -87,7 +88,7 @@ final class RouterFactory
     {
         $this->container = $container;
         // reattach container if strategy supports it
-        if ($this->strategy && \method_exists($this->strategy, 'setContainer')) {
+        if ($this->strategy && method_exists($this->strategy, 'setContainer')) {
             $this->strategy->setContainer($container);
         }
         return $this;
@@ -102,7 +103,7 @@ final class RouterFactory
     /** Replace the internal League strategy (Html/Json/Text or custom). */
     public function useStrategy(StrategyInterface $strategy): self
     {
-        if (\method_exists($strategy, 'setContainer') && $this->container) {
+        if (method_exists($strategy, 'setContainer') && $this->container) {
             $strategy->setContainer($this->container);
         }
         $this->strategy = $strategy;

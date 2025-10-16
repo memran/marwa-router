@@ -3,7 +3,8 @@
 declare(strict_types=1);
 
 namespace Marwa\Router\Fluent;
-
+use \Marwa\Router\RouterFactory;
+use Closure;
 final class RouteRegistrar
 {
     private string $groupPrefix = '';
@@ -16,7 +17,7 @@ final class RouteRegistrar
     /** @var array{limit:int,per:int,key:string}|null */
     private ?array $groupThrottle = null;
 
-    public function __construct(private \Marwa\Router\RouterFactory $factory) {}
+    public function __construct(private  RouterFactory $factory) {}
 
     /**
      * @param array{
@@ -28,7 +29,7 @@ final class RouteRegistrar
      *   throttle?:array{limit:int,per:int,key:string}
      * } $opts
      */
-    public function group(array $opts, \Closure $routes): void
+    public function group(array $opts, Closure $routes): void
     {
         $child = new self($this->factory);
 

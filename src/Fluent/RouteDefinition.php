@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 namespace Marwa\Router\Fluent;
+use Marwa\Router\RouterFactory;
 
 final class RouteDefinition
 {
@@ -24,7 +25,7 @@ final class RouteDefinition
     private ?array $throttle = null;
 
     public function __construct(
-        private \Marwa\Router\RouterFactory $factory,
+        private RouterFactory $factory,
         array|string $methods,
         string $path,
         callable|array|string $handler
@@ -72,7 +73,7 @@ final class RouteDefinition
         return $this;
     }
 
-    public function register(): \Marwa\Router\RouterFactory
+    public function register(): RouterFactory
     {
         $finalName = $this->name;
         if ($this->namePrefix && $this->name !== null) {
