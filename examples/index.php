@@ -81,9 +81,23 @@ $app->registerFromDirectories([__DIR__ . '/Controllers']);
 // });
 
 // Run app (reads globals, dispatches, emits)
-$app->setNotFoundHandler(function ($req){
+$app->setNotFoundHandler(function ($req) {
     return Response::text("Route Not Found");
 });
+
+/**
+ * $app->use(new \Marwa\Request\Http\Middleware\RequestGuardMiddleware(
+ *   allowedMethods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
+ *   maxContentLength: 2_000_000
+ *));
+ *$app->use(new \Marwa\Request\Http\Middleware\ContentTypeMiddleware(
+ *   requireJsonForWrites: true,
+ *   maxJsonBytes: 1_000_000,
+ *   maxJsonDepth: 32
+ *));
+ * $app->use(new \Marwa\Request\Http\Middleware\SecurityHeadersMiddleware());
+ */
+
 $app->run();
 
 /**
@@ -98,5 +112,3 @@ $app->run();
 // }else {
 //      var_dump("URL is not valid");
 // }
-
-
