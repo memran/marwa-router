@@ -444,6 +444,7 @@ final class RouterFactory
     {
         if (\is_object($mw)) return $mw;
         if ($this->container && $this->container->has($mw)) return $this->container->get($mw);
+        
         return new $mw();
     }
 
