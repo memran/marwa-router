@@ -6,8 +6,9 @@ $startTime  = microtime(true);
 
 
 use Marwa\Router\RouterFactory;
+use Marwa\Router\Response;
 use Psr\SimpleCache\CacheInterface;
-use Laminas\Diactoros\Response\JsonResponse;
+
 // Use any PSR-16 cache implementation you like.
 // Example: symfony/cache PSR-16 adapter, or your own.
 $cache = new class implements CacheInterface {
@@ -70,12 +71,12 @@ $app->registerFromDirectories([__DIR__ . '/Controllers']);
 
 // $app->fluent()->group(['prefix' => '/api', 'name' => 'api.'], function ($r) {
 //     // GET /api/hello  (also matches /api/hello/)
-//     $r->get('/hello', fn() => new JsonResponse(['hi' => 'there']))
+//     $r->get('/hello', fn() => Response::json(['hi' => 'there']))
 //         ->name('hello')
 //         ->register();
 
 //     // GET /api/users/{id}  (also /api/users/{id}/)
-//     $r->get('/users/{id}', fn($req) => new JsonResponse(['id' => (int)($req->getAttribute('id') ?? 0)]))
+//     $r->get('/users/{id}', fn($req) => Response::json(['id' => (int)($req->getAttribute('id') ?? 0)]))
 //         ->name('users.show')
 //         ->where('id', '\d+')
 //         ->register();
