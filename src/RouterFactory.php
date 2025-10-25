@@ -380,8 +380,11 @@ final class RouterFactory
         $this->assertUniqueRoute($finalMethods, $pretty === '' ? '/' : $pretty, $domain);
         $this->assertUniqueName($name);
 
-        $route = $this->router->map($finalMethods, $mapped, $callable);
-        if ($name) {
+        $route = null;
+        foreach ($finalMethods as $method) {
+            $route = $this->router->map($method, $mapped, $callable);
+        }
+        if ($name && $route) {
             $route->setName($name);
         }
         if ($domain && \method_exists($route, 'setHost')) {

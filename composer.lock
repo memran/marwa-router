@@ -1192,18 +1192,21 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/memran/php-testify.git",
-                "reference": "28bc005b668390f74ec59c4b4a6cbb3cdead6e44"
+                "reference": "ecf5f5339e251d1bec28c935fb2129ea5a5315c0"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/memran/php-testify/zipball/28bc005b668390f74ec59c4b4a6cbb3cdead6e44",
-                "reference": "28bc005b668390f74ec59c4b4a6cbb3cdead6e44",
+                "url": "https://api.github.com/repos/memran/php-testify/zipball/ecf5f5339e251d1bec28c935fb2129ea5a5315c0",
+                "reference": "ecf5f5339e251d1bec28c935fb2129ea5a5315c0",
                 "shasum": ""
             },
             "require": {
                 "php": "^8.0",
                 "phpunit/phpunit": " ^11.0"
             },
+            "bin": [
+                "bin/testify"
+            ],
             "type": "library",
             "autoload": {
                 "files": [
@@ -1214,6 +1217,9 @@
                 }
             },
             "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
             "authors": [
                 {
                     "name": "Mohammad Emran",
@@ -1234,7 +1240,7 @@
                 "issues": "https://github.com/memran/php-testify/issues",
                 "source": "https://github.com/memran/php-testify/tree/v1.0.0"
             },
-            "time": "2025-10-25T14:30:15+00:00"
+            "time": "2025-10-25T15:28:19+00:00"
         },
         {
             "name": "myclabs/deep-copy",
