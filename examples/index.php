@@ -63,7 +63,7 @@ use Psr\SimpleCache\CacheInterface;
 $app = new RouterFactory();
 
 // 1) Annotation scan (optional)
-$app->registerFromDirectories([__DIR__ . '/Controllers']);
+$app->registerFromDirectories([__DIR__ . DIRECTORY_SEPARATOR . 'Controllers']);
 
 //2) Manual routes
 
@@ -81,9 +81,8 @@ $app->registerFromDirectories([__DIR__ . '/Controllers']);
 // });
 
 // Run app (reads globals, dispatches, emits)
-$app->setNotFoundHandler(function ($req) {
-    return Response::text("Route Not Found");
-});
+$app->setNotFoundHandler(fn($req) => Response::text("Route Not Found"));
+
 
 /**
  * $app->use(new \Marwa\Request\Http\Middleware\RequestGuardMiddleware(

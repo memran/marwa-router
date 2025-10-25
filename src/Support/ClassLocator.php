@@ -22,7 +22,7 @@ final class ClassLocator
 
         foreach ($directories as $dir) {
             $dir = self::normalizeDir($dir);
-
+            //check directory exists or not
             if (!is_dir($dir)) {
                 if ($strict) {
                     throw new \UnexpectedValueException("Directory not found: {$dir}");
@@ -36,15 +36,36 @@ final class ClassLocator
             foreach ($rit as $match) {
                 $file = $match[0];
                 // Skip non-regular files (symlinks etc. are fine)
-                if (!is_file($file)) {
-                    continue;
+                if (is_file($file)) {
+                    require_once $file;
+                    $loaded[] = realpath($file) ?: $file;
+                    //continue;
                 }
-                require_once $file;
-                $loaded[] = realpath($file) ?: $file;
             }
         }
 
         return $loaded;
+    }
+
+    private static function pathsToCallableClasses(array $paths): array
+    {
+        $classes = [];
+
+        foreach ($paths as $path) {
+            if (!file_exists($path)) {
+                continue;
+            }
+
+            $content = file_get_contents($path);
+            preg_match('/namespace\s+([^;]+);/', $content, $matches);
+
+            $namespace = $matches[1] ?? '';
+            $className = pathinfo($path, PATHINFO_FILENAME);
+
+            $classes[] = $namespace ? $namespace . '\\' . $className : $className;
+        }
+
+        return $classes;
     }
 
     /**
@@ -58,15 +79,17 @@ final class ClassLocator
      */
     public static function loadAndCollectClasses(callable $loader, ?array $limitToDirs = null): array
     {
+
+        return self::pathsToCallableClasses($loader());
         $before = get_declared_classes();
+        //var_dump($before);
         $loaderReturn = $loader(); // may return file list (unused)
         $after  = get_declared_classes();
-
+        var_dump($loaderReturn);
         $new = array_values(array_diff($after, $before));
         if (!$new) {
             return [];
         }
-
         if ($limitToDirs === null || $limitToDirs === []) {
             // No filtering; everything declared during the load is returned.
             return $new;

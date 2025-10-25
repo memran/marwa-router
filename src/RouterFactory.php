@@ -181,8 +181,7 @@ final class RouterFactory
         );
 
         if (empty($classes)) {
-            $list = implode(', ', array_map(static fn($p) => rtrim($p, "\\/"), $controllerDirs));
-            throw new \RuntimeException("No classes discovered under: {$list}");
+            return $this;
         }
 
         return $this->registerFromClasses($classes);
