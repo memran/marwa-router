@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Marwa\Router\Http;
 
 use Laminas\Diactoros\ServerRequestFactory;
+use Laminas\Diactoros\ServerRequest;
 use Psr\Http\Message\ServerRequestInterface;
+use Marwa\Support\Arr;
 
 /**
  * Static Laravel-style Input facade built on top of HttpRequest.
@@ -15,7 +17,8 @@ use Psr\Http\Message\ServerRequestInterface;
  *   Input::post('name');
  *   Input::all();
  *   Input::route('id');
- *   Input::header('User-Agent');
+ *   Input::has('email');
+ *   Input::merge(['foo' => 'bar']);
  */
 final class Input
 {
@@ -63,7 +66,6 @@ final class Input
 
     public static function post(string $key, mixed $default = null): mixed
     {
-        // Body-only access
         $body = self::http()->psr()->getParsedBody();
         if (!is_array($body)) {
             return $default;
@@ -114,5 +116,53 @@ final class Input
     public static function except(array $keys): array
     {
         return self::http()->except($keys);
+    }
+
+    // -----------------------------------------------------------------
+    // 💡 NEW METHODS: has(), exists(), merge()
+    // -----------------------------------------------------------------
+
+    /**
+     * Check if an input key exists and is NOT empty.
+     */
+    public static function has(string $key): bool
+    {
+        $data = self::all();
+
+        return Arr::has($data, $key);
+    }
+
+    /**
+     * Check if an input key exists (even if empty).
+     */
+    public static function exists(string $key): bool
+    {
+        $data = self::all();
+        return array_key_exists($key, $data);
+    }
+
+    /**
+     * Merge new input data into current request (immutably).
+     *
+     * Example:
+     *   Input::merge(['debug' => true]);
+     *
+     * Returns the new merged HttpRequest instance.
+     */
+    public static function merge(array $data): HttpRequest
+    {
+        $req = self::http()->psr();
+
+        $body = $req->getParsedBody();
+        $bodyArray = is_array($body) ? $body : [];
+
+        // Merge and clone immutably
+        $merged = array_merge($bodyArray, $data);
+        $newReq = $req->withParsedBody($merged);
+
+        // Rebind to the Input singleton
+        self::setRequest($newReq);
+
+        return self::$instance;
     }
 }
