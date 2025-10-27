@@ -33,6 +33,7 @@ use Laminas\Diactoros\ResponseFactory;
 use Laminas\Diactoros\ServerRequestFactory;
 use Laminas\HttpHandlerRunner\Emitter\SapiEmitter;
 use League\Route\Http\Exception\NotFoundException;
+use Marwa\Router\Http\HttpRequest;
 
 final class RouterFactory
 {
@@ -148,7 +149,7 @@ final class RouterFactory
     public function run(): void
     {
         try {
-            $request  = ServerRequestFactory::fromGlobals();
+            $request = ServerRequestFactory::fromGlobals();
             $response = $this->dispatch($request);
             (new SapiEmitter())->emit($response);
         } catch (NotFoundException $e) {
@@ -277,7 +278,10 @@ final class RouterFactory
 
                 // Handler (container aware)
                 $handler = [$this->resolveController($controller->getName()), $method->getName()];
-                $route   = $this->router->map($methods, $mappedPath, $handler);
+                $route = null;
+                foreach ($methods as $httpMethod) {
+                    $route = $this->router->map($httpMethod, $mappedPath, $handler);
+                }
 
                 // Name
                 if ($routeMeta->name) {

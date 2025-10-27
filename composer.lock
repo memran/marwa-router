@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "1f699cf8dbb26d826e8a54fa29753c9d",
+    "content-hash": "f47ff92ba95f6f9cb9aa3c98e0d91664",
     "packages": [
         {
             "name": "laminas/laminas-diactoros",
@@ -311,6 +311,51 @@
                 }
             ],
             "time": "2024-11-25T08:10:15+00:00"
+        },
+        {
+            "name": "memran/marwa-support",
+            "version": "v1.2.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/memran/marwa-support.git",
+                "reference": "5b0e2e36f80260a76f96ba438ae66cc197a89c74"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/memran/marwa-support/zipball/5b0e2e36f80260a76f96ba438ae66cc197a89c74",
+                "reference": "5b0e2e36f80260a76f96ba438ae66cc197a89c74",
+                "shasum": ""
+            },
+            "require": {
+                "ext-json": "*",
+                "ext-mbstring": "*",
+                "php": "^8.0"
+            },
+            "require-dev": {
+                "phpunit/phpunit": "^9.6"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Marwa\\Support\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Mohammad Emran",
+                    "email": "memran.dhk@gmail.com"
+                }
+            ],
+            "description": "Marwa support library for PHP 8+ with utility classes for strings, arrays, files, objects, and more",
+            "support": {
+                "issues": "https://github.com/memran/marwa-support/issues",
+                "source": "https://github.com/memran/marwa-support/tree/v1.2.0"
+            },
+            "time": "2025-08-21T13:59:14+00:00"
         },
         {
             "name": "nikic/fast-route",
