@@ -1,8 +1,8 @@
 # Marwa Router
+
 ![License](https://img.shields.io/github/license/memran/marwa-router)
 [![Total Downloads](https://img.shields.io/packagist/dt/memran/marwa-router.svg?style=flat-square)](https://packagist.org/packages/memran/marwa-router)
 ![PHP Version](https://img.shields.io/badge/PHP-8.1+-blue)
-
 
 Attribute-driven routing and a fluent API on top of league/route.
 
@@ -14,6 +14,15 @@ Attribute-driven routing and a fluent API on top of league/route.
 - ✅ Domain binding and param constraints
 - ✅ Custom Not Found handler
 - ✅ Route registry & `bin/routes-dump`
+- ✅ Framework-agnostic and PSR-7 compliant
+- ✅ Works with Laminas Diactoros request objects
+- ✅ Supports:
+  - Query parameters
+  - POST / JSON body
+  - Route attributes
+  - Uploaded files
+  - Cookies and headers
+  - Automatically falls back to PHP globals if not set manually
 
 ## Install
 
@@ -78,7 +87,7 @@ declare(strict_types=1);
 
 namespace Examples\Controllers;
 
-use Laminas\Diactoros\Response\JsonResponse;
+use Marwa\Router\Response;
 use Marwa\Router\Attributes\{Prefix, Route, UseMiddleware, GroupMiddleware, Where, Domain, Throttle};
 use Psr\Http\Message\ServerRequestInterface;
 
@@ -89,16 +98,18 @@ use Psr\Http\Message\ServerRequestInterface;
 final class UserController
 {
     #[Route('GET', '', name: 'index')]
-    public function index(): JsonResponse
+    public function index(): ResponseInterface
     {
-        return new JsonResponse(['users' => []]);
+        $input = new HttpRequest($request);
+        return Response::json(['users' => $input->all()]);
     }
 
     #[UseMiddleware(\Examples\Middleware\TimingMiddleware::class)]
     #[Route('GET', '/{id}', name: 'show')]
-    public function show(ServerRequestInterface $req, array $args): JsonResponse
+    public function show(ServerRequestInterface $req): ResponseInterface
     {
-        return new JsonResponse(['id' => (int)($args['id'] ?? 0)]);
+        $input = Input::setRequest($request);
+        return Response::json(['id' => Input::get('id')]);
     }
 }
 
@@ -162,14 +173,6 @@ Notes:
 - ->register() finalizes each route in the fluent builder.
 - ->where(), ->middleware(), ->throttle(), ->name() are chainable.
 - Domain: ->domain('api.example.com').
-
-## Strategies (Response Format)
-
-```bash
-$app->useHtmlStrategy(); // default
-$app->useJsonStrategy(JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-$app->useTextStrategy();
-```
 
 ## Throttling (PSR-16)
 
@@ -240,70 +243,73 @@ declare(strict_types=1);
 require __DIR__ . '/../vendor/autoload.php';
 
 use Marwa\Router\RouterFactory;
-use Psr\SimpleCache\CacheInterface;
-use Laminas\Diactoros\Response\JsonResponse;
-// Use any PSR-16 cache implementation you like.
-// Example: symfony/cache PSR-16 adapter, or your own.
-$cache = new class implements CacheInterface {
-    private array $s = [];
-    public function get($key, $default = null): mixed
-    {
-        return $this->s[$key][0] ?? $default;
-    }
-    public function set($key, $value, $ttl = null): bool
-    {
-        $this->s[$key] = [$value, time() + (is_int($ttl) ? $ttl : 60)];
-        return true;
-    }
-    public function delete($key): bool
-    {
-        unset($this->s[$key]);
-        return true;
-    }
-    public function clear(): bool
-    {
-        $this->s = [];
-        return true;
-    }
-    public function getMultiple($keys, $default = null): iterable
-    {
-        $out = [];
-        foreach ($keys as $k) {
-            $out[$k] = $this->get($k, $default);
-        }
-        return $out;
-    }
-    public function setMultiple($values, $ttl = null): bool
-    {
-        foreach ($values as $k => $v) {
-            $this->set($k, $v, $ttl);
-        }
-        return true;
-    }
-    public function deleteMultiple($keys): bool
-    {
-        foreach ($keys as $k) {
-            $this->delete($k);
-        }
-        return true;
-    }
-    public function has($key): bool
-    {
-        return array_key_exists($key, $this->s);
-    }
-};
-
-//$cache = new FilesystemCache(__DIR__ . '/storage/cache/');
 
 $app = new RouterFactory();
 
 // 1) Annotation scan (optional)
 $app->registerFromDirectories([__DIR__ . '/Controllers']);
 
-
 // Run app (reads globals, dispatches, emits)
 $app->run();
 
+```
+
+### Get query or body parameters
+
+```bash
+Input::setRequest($request);
+$name  = Input::get('name');
+$email = Input::post('email');
+$page  = Input::query('page', 1);
+$all   = Input::all();
+```
+
+### Get route parameters (from League\Route)
+
+```bash
+$id = Input::route('id');
+```
+
+### Get uploaded file
+
+```bash
+$file = Input::file('avatar');
+```
+
+### Get cookie or header
+
+```bash
+$session = Input::cookie('session');
+$agent = Input::header('User-Agent');
+
+```
+
+### Get HTTP metadata
+
+```bash
+$method = Input::method(); // GET, POST, etc.
+$url    = Input::url();    // Full URL
+```
+
+### Custom Request
+
+You can create a synthetic request easily using your own data:
+
+```bash
+use Marwa\Request\Http\RequestFactory;
+use Marwa\Request\Http\Input;
+
+$request = RequestFactory::fromArrays(
+    server: ['REQUEST_METHOD' => 'POST', 'REQUEST_URI' => '/test'],
+    query: ['q' => 'search'],
+    parsedBody: ['name' => 'Emran'],
+    cookies: ['session' => 'xyz']
+);
+
+Input::setRequest($request);
+
+echo Input::get('name'); // Emran
+echo Input::query('q');  // search
 ```
 
 ## Troubleshooting

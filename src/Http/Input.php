@@ -8,139 +8,111 @@ use Laminas\Diactoros\ServerRequestFactory;
 use Psr\Http\Message\ServerRequestInterface;
 
 /**
- * Static Laravel-like Input facade for PSR-7 requests.
- * Uses Laminas Diactoros under the hood.
+ * Static Laravel-style Input facade built on top of HttpRequest.
  *
  * Example:
- *   Input::get('q')
- *   Input::post('name')
- *   Input::file('avatar')
- *   Input::all()
+ *   Input::get('q');
+ *   Input::post('name');
+ *   Input::all();
+ *   Input::route('id');
+ *   Input::header('User-Agent');
  */
 final class Input
 {
-    private static ?ServerRequestInterface $request = null;
+    private static ?HttpRequest $instance = null;
 
     /**
-     * Initialize Input from a PSR-7 request.
-     * Typically done at bootstrap or in middleware.
+     * Bind a PSR-7 request to Input.
      */
     public static function setRequest(ServerRequestInterface $request): void
     {
-        self::$request = $request;
+        self::$instance = new HttpRequest($request);
     }
 
     /**
-     * Ensure we have a PSR-7 request.
+     * Get the internal HttpRequest instance.
      */
-    private static function getRequest(): ServerRequestInterface
+    private static function http(): HttpRequest
     {
-        if (self::$request === null) {
-            // Default fallback from globals
-            self::$request = ServerRequestFactory::fromGlobals();
+        if (self::$instance === null) {
+            $req = ServerRequestFactory::fromGlobals();
+            self::$instance = new HttpRequest($req);
         }
-        return self::$request;
+        return self::$instance;
     }
 
     /**
-     * Get merged query + body input data.
-     *
-     * @return array<string,mixed>
+     * Reset for testing or rebind.
      */
+    public static function reset(): void
+    {
+        self::$instance = null;
+    }
+
+    // --- Proxy methods to HttpRequest ---
+
     public static function all(): array
     {
-        $req = self::getRequest();
-        $body = $req->getParsedBody();
-        $bodyArray = is_array($body) ? $body : [];
-        return array_merge($req->getQueryParams(), $bodyArray);
+        return self::http()->all();
     }
 
-    /**
-     * Get input value from query/body.
-     */
     public static function get(string $key, mixed $default = null): mixed
     {
-        $data = self::all();
-        return array_key_exists($key, $data) ? $data[$key] : $default;
+        return self::http()->input($key, $default);
     }
 
-    /**
-     * Get query-only parameter.
-     */
-    public static function query(string $key, mixed $default = null): mixed
-    {
-        $params = self::getRequest()->getQueryParams();
-        return $params[$key] ?? $default;
-    }
-
-    /**
-     * Get body-only parameter (POST, JSON, etc.)
-     */
     public static function post(string $key, mixed $default = null): mixed
     {
-        $body = self::getRequest()->getParsedBody();
+        // Body-only access
+        $body = self::http()->psr()->getParsedBody();
         if (!is_array($body)) {
             return $default;
         }
         return $body[$key] ?? $default;
     }
 
-    /**
-     * Get uploaded file(s).
-     */
-    public static function file(?string $key = null): mixed
+    public static function query(string $key, mixed $default = null): mixed
     {
-        $files = self::getRequest()->getUploadedFiles();
-        return $key === null ? $files : ($files[$key] ?? null);
+        return self::http()->query($key, $default);
     }
 
-    /**
-     * Get route parameter set by the router.
-     */
     public static function route(string $key, mixed $default = null): mixed
     {
-        return self::getRequest()->getAttribute($key) ?? $default;
+        return self::http()->route($key, $default);
     }
 
-    /**
-     * Get a cookie value.
-     */
+    public static function file(?string $key = null): mixed
+    {
+        return self::http()->file($key);
+    }
+
     public static function cookie(string $key, mixed $default = null): mixed
     {
-        $cookies = self::getRequest()->getCookieParams();
-        return $cookies[$key] ?? $default;
+        return self::http()->cookie($key, $default);
     }
 
-    /**
-     * Get header value (first match).
-     */
     public static function header(string $key, mixed $default = null): mixed
     {
-        $values = self::getRequest()->getHeader($key);
-        return $values[0] ?? $default;
+        return self::http()->header($key, $default);
     }
 
-    /**
-     * HTTP method (GET, POST, etc.)
-     */
     public static function method(): string
     {
-        return strtoupper(self::getRequest()->getMethod());
+        return self::http()->method();
     }
 
-    /**
-     * Full request URL.
-     */
     public static function url(): string
     {
-        return (string) self::getRequest()->getUri();
+        return self::http()->url();
     }
 
-    /**
-     * Reset for testing.
-     */
-    public static function reset(): void
+    public static function only(array $keys): array
     {
-        self::$request = null;
+        return self::http()->only($keys);
+    }
+
+    public static function except(array $keys): array
+    {
+        return self::http()->except($keys);
     }
 }
