@@ -34,6 +34,7 @@ use Laminas\Diactoros\ServerRequestFactory;
 use Laminas\HttpHandlerRunner\Emitter\SapiEmitter;
 use League\Route\Http\Exception\NotFoundException;
 use Marwa\Router\Http\HttpRequest;
+use Marwa\Router\Http\RequestFactory;
 
 final class RouterFactory
 {
@@ -149,7 +150,8 @@ final class RouterFactory
     public function run(): void
     {
         try {
-            $request = ServerRequestFactory::fromGlobals();
+            //$request = ServerRequestFactory::fromGlobals();
+            $request = RequestFactory::fromGlobals();
             $response = $this->dispatch($request);
             (new SapiEmitter())->emit($response);
         } catch (NotFoundException $e) {
