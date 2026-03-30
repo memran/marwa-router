@@ -8,6 +8,7 @@ use Laminas\Diactoros\Response\JsonResponse;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\{MiddlewareInterface, RequestHandlerInterface};
+use Psr\Log\LoggerInterface;
 use Psr\SimpleCache\CacheInterface;
 
 /**
@@ -22,6 +23,7 @@ final class ThrottleMiddleware implements MiddlewareInterface
         private int $limit,
         private int $perSeconds = 60,
         private string $key = 'ip', // 'ip' or header name (e.g. 'X-API-Key')
+        private ?LoggerInterface $logger = null,
     ) {}
 
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
@@ -32,6 +34,15 @@ final class ThrottleMiddleware implements MiddlewareInterface
         $count = (int) ($this->cache->get($bucketKey, 0));
 
         if ($count >= $this->limit) {
+            $this->logger?->warning('Throttle limit exceeded.', [
+                'bucket' => $bucketKey,
+                'limit' => $this->limit,
+                'per_seconds' => $this->perSeconds,
+                'key' => $this->key,
+                'path' => $request->getUri()->getPath(),
+                'method' => $request->getMethod(),
+            ]);
+
             return new JsonResponse(['error' => 'Too Many Requests'], 429);
         }
 

@@ -10,7 +10,10 @@ use Marwa\Router\RouterFactory;
 $factory = new RouterFactory();
 $factory->registerFromDirectories([__DIR__ . '/../examples/Controllers'], strict: true);
 
-$cacheFile = __DIR__ . '/../var/cache/routes.php';
-$factory->cacheRoutesTo($cacheFile);
+$metadataFile = __DIR__ . '/../var/cache/routes.php';
+$compiledFile = __DIR__ . '/../var/cache/routes.compiled.php';
+$factory->cacheRoutesTo($metadataFile);
+$factory->compileRoutesTo($compiledFile);
 
-echo "Wrote {$cacheFile}\n";
+echo "Wrote {$metadataFile}\n";
+echo "Wrote {$compiledFile}\n";

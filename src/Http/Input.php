@@ -107,6 +107,21 @@ final class Input
         return self::http()->url();
     }
 
+    public static function host(): string
+    {
+        return self::http()->host();
+    }
+
+    public static function subdomain(): ?string
+    {
+        return self::http()->subdomain();
+    }
+
+    public static function subdomainFor(string $baseDomain): ?string
+    {
+        return self::http()->subdomainFor($baseDomain);
+    }
+
     /**
      * @param array<int, string> $keys
      * @return array<string, mixed>

@@ -169,6 +169,73 @@ final class HttpRequest
     }
 
     /**
+     * Host name without port.
+     */
+    public function host(): string
+    {
+        return $this->request->getUri()->getHost();
+    }
+
+    /**
+     * Best-effort subdomain extraction.
+     *
+     * Returns the leftmost label when the host contains at least three labels,
+     * for example "tenant" from "tenant.example.com".
+     */
+    public function subdomain(): ?string
+    {
+        $host = $this->host();
+        if ($host === '' || filter_var($host, FILTER_VALIDATE_IP) !== false) {
+            return null;
+        }
+
+        $parts = explode('.', $host);
+        if (count($parts) < 3) {
+            return null;
+        }
+
+        $subdomain = trim($parts[0]);
+
+        return $subdomain !== '' ? $subdomain : null;
+    }
+
+    /**
+     * Resolve the subdomain relative to a known base domain.
+     *
+     * Examples:
+     * - host "tenant.example.com" with base "example.com" => "tenant"
+     * - host "admin.eu.example.com" with base "example.com" => "admin.eu"
+     * - host "example.com" with base "example.com" => null
+     */
+    public function subdomainFor(string $baseDomain): ?string
+    {
+        $host = strtolower(trim($this->host()));
+        $baseDomain = strtolower(trim($baseDomain, " \t\n\r\0\x0B."));
+
+        if ($host === '' || $baseDomain === '') {
+            return null;
+        }
+
+        if (filter_var($host, FILTER_VALIDATE_IP) !== false || filter_var($baseDomain, FILTER_VALIDATE_IP) !== false) {
+            return null;
+        }
+
+        if ($host === $baseDomain) {
+            return null;
+        }
+
+        $suffix = '.' . $baseDomain;
+        if (!str_ends_with($host, $suffix)) {
+            return null;
+        }
+
+        $subdomain = substr($host, 0, -strlen($suffix));
+        $subdomain = trim($subdomain, '.');
+
+        return $subdomain !== '' ? $subdomain : null;
+    }
+
+    /**
      * Header helper.
      *
      * If $key provided → first header value or default.

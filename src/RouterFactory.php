@@ -18,16 +18,19 @@ use Marwa\Router\Attributes\{
     UseMiddleware,
     Where as WhereAttr
 };
-use Marwa\Router\Exceptions\FileNotFoundException;
+use Marwa\Router\Exceptions\InvalidNotFoundHandlerResponseException;
 use Marwa\Router\Exceptions\InvalidRouteDefinitionException;
 use Marwa\Router\Exceptions\RouteConflictException;
+use Marwa\Router\Exceptions\RouteNotFoundException;
 use Marwa\Router\Http\RequestFactory;
 use Marwa\Router\Middleware\ThrottleMiddleware;
 use Marwa\Router\Support\ClassLocator;
+use Marwa\Router\Support\RouteCache;
 use Psr\Container\ContainerInterface;
 use Psr\Http\Message\ResponseFactoryInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
+use Psr\Log\LoggerInterface;
 use Psr\SimpleCache\CacheInterface;
 use ReflectionAttribute;
 use ReflectionClass;
@@ -42,6 +45,10 @@ final class RouterFactory
     private ?ApplicationStrategy $strategy = null;
     private ?ContainerInterface $container;
     private ?CacheInterface $cache;
+    private ?LoggerInterface $logger = null;
+    /** @var array<int, array{methods:array<int,string>,path:string,handler:callable|string|array{0: object|class-string, 1: non-empty-string},name:?string,middlewares:array<int,class-string|object>,domain:?string,where:?array<string,string>,throttle:?array{limit:int,per:int,key:string}}> */
+    private array $compiledDefinitions = [];
+    private RouteCache $routeCache;
 
     /** @var array<string, true> */
     private array $seenRouteKeys = [];
@@ -60,11 +67,13 @@ final class RouterFactory
         ?ResponseFactoryInterface $responseFactory = null,
         ?CacheInterface $cache = null,
         ?LeagueRouter $router = null,
+        ?RouteCache $routeCache = null,
     ) {
         $responseFactory ??= new ResponseFactory();
         $this->cache = $cache;
         $this->router = $router ?? new LeagueRouter();
         $this->container = $container;
+        $this->routeCache = $routeCache ?? new RouteCache();
 
         if ($container !== null) {
             $this->setContainer($container);
@@ -95,33 +104,33 @@ final class RouterFactory
         return $this;
     }
 
+    public function setLogger(?LoggerInterface $logger): self
+    {
+        $this->logger = $logger;
+
+        return $this;
+    }
+
     public function cacheRoutesTo(string $file): void
     {
-        $directory = dirname($file);
-        if (!is_dir($directory) && !mkdir($directory, 0775, true) && !is_dir($directory)) {
-            throw new \RuntimeException(sprintf('Unable to create route cache directory: %s', $directory));
-        }
-
-        $payload = "<?php\n\ndeclare(strict_types=1);\n\nreturn " . var_export($this->routes(), true) . ";\n";
-        if (file_put_contents($file, $payload, LOCK_EX) === false) {
-            throw new \RuntimeException(sprintf('Unable to write route cache file: %s', $file));
-        }
+        $this->routeCache->writeMetadata($file, $this->routes());
     }
 
     public function loadRoutesFrom(string $file): bool
     {
-        if (!is_file($file)) {
-            throw new FileNotFoundException($file);
-        }
-
-        $routes = require $file;
-        if (!is_array($routes)) {
-            throw new \UnexpectedValueException(sprintf('Route cache file must return an array: %s', $file));
-        }
-
-        $this->registry = $routes;
+        $this->registry = $this->routeCache->loadMetadata($file);
 
         return true;
+    }
+
+    public function compileRoutesTo(string $file): void
+    {
+        $this->routeCache->writeCompiled($file, $this->compiledDefinitions);
+    }
+
+    public function loadCompiledRoutesFrom(string $file): bool
+    {
+        return $this->routeCache->loadCompiled($file, $this);
     }
 
     public function enableConflictDetection(bool $on = true): self
@@ -143,19 +152,38 @@ final class RouterFactory
         return $this->router->dispatch($request);
     }
 
+    public function handle(ServerRequestInterface $request): ResponseInterface
+    {
+        try {
+            return $this->dispatch($request);
+        } catch (NotFoundException $e) {
+            if ($this->notFoundHandler === null) {
+                $this->logger?->notice('Route not found.', [
+                    'path' => $request->getUri()->getPath(),
+                    'method' => $request->getMethod(),
+                    'host' => $request->getUri()->getHost(),
+                ]);
+                throw new RouteNotFoundException('Route not found.', previous: $e);
+            }
+
+            try {
+                return $this->normalizeHandlerResponse(($this->notFoundHandler)($request));
+            } catch (InvalidNotFoundHandlerResponseException $handlerException) {
+                $this->logger?->error('Invalid not-found handler response.', [
+                    'path' => $request->getUri()->getPath(),
+                    'method' => $request->getMethod(),
+                    'host' => $request->getUri()->getHost(),
+                ]);
+
+                throw $handlerException;
+            }
+        }
+    }
+
     public function run(): void
     {
         $request = RequestFactory::fromGlobals();
-
-        try {
-            $response = $this->dispatch($request);
-        } catch (NotFoundException $e) {
-            if ($this->notFoundHandler === null) {
-                throw new \RuntimeException('Route not found.', previous: $e);
-            }
-
-            $response = $this->normalizeHandlerResponse(($this->notFoundHandler)($request));
-        }
+        $response = $this->handle($request);
 
         (new SapiEmitter())->emit($response);
     }
@@ -303,6 +331,22 @@ final class RouterFactory
                     'action' => $method->getName(),
                     'domain' => $effectiveDomain,
                 ];
+                $this->compiledDefinitions[] = [
+                    'methods' => $methods,
+                    'path' => $prettyPath,
+                    'handler' => [$controller->getName(), $method->getName()],
+                    'name' => $routeName,
+                    'middlewares' => $middlewares,
+                    'domain' => $effectiveDomain,
+                    'where' => null,
+                    'throttle' => $effectiveThrottle === null
+                        ? null
+                        : [
+                            'limit' => $effectiveThrottle->limit,
+                            'per' => $effectiveThrottle->perSeconds,
+                            'key' => $effectiveThrottle->key,
+                        ],
+                ];
             }
         }
     }
@@ -378,6 +422,16 @@ final class RouterFactory
             'controller' => $controllerName,
             'action' => $actionName,
             'domain' => $domain,
+        ];
+        $this->compiledDefinitions[] = [
+            'methods' => $finalMethods,
+            'path' => $path,
+            'handler' => $this->normalizeCompiledHandler($handler),
+            'name' => $name,
+            'middlewares' => $middlewares,
+            'domain' => $domain,
+            'where' => $where,
+            'throttle' => $throttleConfig,
         ];
 
         return $this;
@@ -628,6 +682,7 @@ final class RouterFactory
                     $throttle->limit,
                     $throttle->perSeconds,
                     $throttle->key,
+                    $this->logger,
                 ));
             }
         }
@@ -657,7 +712,9 @@ final class RouterFactory
             return Response::html($response, 404);
         }
 
-        throw new \UnexpectedValueException('Not-found handler must return a ResponseInterface, string, or array.');
+        throw new InvalidNotFoundHandlerResponseException(
+            'Not-found handler must return a ResponseInterface, string, or array.',
+        );
     }
 
     private function callRouteMethodIfAvailable(mixed $route, string $method, bool $condition, mixed ...$arguments): void
@@ -676,5 +733,25 @@ final class RouterFactory
         }
 
         $route->{$method}(...$arguments);
+    }
+
+    /**
+     * @param callable|string|array{0: object|class-string, 1: non-empty-string}|array<mixed> $handler
+     * @return callable|string|array{0: object|class-string, 1: non-empty-string}
+     */
+    private function normalizeCompiledHandler(callable|array|string $handler): callable|array|string
+    {
+        if (is_array($handler) && isset($handler[0], $handler[1]) && (is_object($handler[0]) || is_string($handler[0])) && is_string($handler[1]) && $handler[1] !== '') {
+            /** @var array{0: object|class-string, 1: non-empty-string} $handler */
+            return $handler;
+        }
+
+        if (is_array($handler)) {
+            throw new \InvalidArgumentException(
+                'Route handlers defined as arrays must use the [class-string|object, method] format.',
+            );
+        }
+
+        return $handler;
     }
 }
