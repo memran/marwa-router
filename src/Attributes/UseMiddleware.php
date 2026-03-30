@@ -13,11 +13,12 @@ use Attribute;
 #[Attribute(Attribute::TARGET_CLASS | Attribute::TARGET_METHOD | Attribute::IS_REPEATABLE)]
 final class UseMiddleware
 {
-    /** @param class-string ...$middlewares */
+    /** @var array<int, class-string> */
     public array $middlewares;
+
+    /** @param class-string ...$middlewares */
     public function __construct(string ...$middlewares)
     {
-        // Assign the variadic parameter to the class property.
-        $this->middlewares = $middlewares;
+        $this->middlewares = array_values($middlewares);
     }
 }

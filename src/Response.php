@@ -4,19 +4,20 @@ declare(strict_types=1);
 
 namespace Marwa\Router;
 
-use Laminas\Diactoros\Response as HttpResponse;
-use Laminas\Diactoros\Response\JsonResponse;
-use Laminas\Diactoros\Response\TextResponse;
-use Laminas\Diactoros\Response\HtmlResponse;
-use Laminas\Diactoros\Response\EmptyResponse;
-use Laminas\Diactoros\Response\RedirectResponse;
-use Laminas\Diactoros\Stream;
-use Psr\Http\Message\ResponseInterface;
 use JsonSerializable;
+use Laminas\Diactoros\Response as HttpResponse;
+use Laminas\Diactoros\Response\EmptyResponse;
+use Laminas\Diactoros\Response\HtmlResponse;
+use Laminas\Diactoros\Response\JsonResponse;
+use Laminas\Diactoros\Response\RedirectResponse;
+use Laminas\Diactoros\Response\TextResponse;
+use Laminas\Diactoros\Stream;
+use Marwa\Router\Exceptions\FileNotFoundException;
+use Psr\Http\Message\ResponseInterface;
 
 final class Response
 {
-    protected ResponseInterface $response;
+    private ResponseInterface $response;
 
     /**
      * Constructor
@@ -28,6 +29,9 @@ final class Response
 
     /**
      * Create JSON response
+     *
+     * @param array<mixed>|JsonSerializable $data
+     * @param array<non-empty-string, array<string>|string> $headers
      */
     public static function json(array|JsonSerializable $data, int $status = 200, array $headers = []): ResponseInterface
     {
@@ -36,6 +40,8 @@ final class Response
 
     /**
      * Create HTML response
+     *
+     * @param array<non-empty-string, array<string>|string> $headers
      */
     public static function html(string $html, int $status = 200, array $headers = []): ResponseInterface
     {
@@ -44,6 +50,8 @@ final class Response
 
     /**
      * Create text response
+     *
+     * @param array<non-empty-string, array<string>|string> $headers
      */
     public static function text(string $text, int $status = 200, array $headers = []): ResponseInterface
     {
@@ -53,6 +61,8 @@ final class Response
 
     /**
      * Create empty response
+     *
+     * @param array<non-empty-string, array<string>|string> $headers
      */
     public static function empty(int $status = 204, array $headers = []): ResponseInterface
     {
@@ -61,6 +71,8 @@ final class Response
 
     /**
      * Create redirect response
+     *
+     * @param array<non-empty-string, array<string>|string> $headers
      */
     public static function redirect(string $uri, int $status = 302, array $headers = []): ResponseInterface
     {
@@ -69,19 +81,21 @@ final class Response
 
     /**
      * Create file download response
+     *
+     * @param array<non-empty-string, array<string>|string> $headers
      */
     public static function download(string $filePath, ?string $filename = null, array $headers = []): ResponseInterface
     {
-        if (!file_exists($filePath)) {
-            throw new \InvalidArgumentException("File not found: {$filePath}");
+        if (!is_file($filePath) || !is_readable($filePath)) {
+            throw new FileNotFoundException($filePath);
         }
 
-        $filename = $filename ?? basename($filePath);
+        $filename = self::sanitizeDownloadFilename($filename ?? basename($filePath));
         $stream = new Stream($filePath, 'r');
 
         $defaultHeaders = [
             'Content-Type' => 'application/octet-stream',
-            'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+            'Content-Disposition' => 'attachment; filename="' . addcslashes($filename, '"\\') . '"',
             'Content-Length' => (string) filesize($filePath),
             'Pragma' => 'no-cache',
             'Expires' => '0',
@@ -89,8 +103,7 @@ final class Response
 
         $headers = array_merge($defaultHeaders, $headers);
 
-       return new HttpResponse($stream, 200, $headers);
-
+        return new HttpResponse($stream, 200, $headers);
     }
 
     /**
@@ -122,6 +135,8 @@ final class Response
 
     /**
      * Set multiple headers at once
+     *
+     * @param array<non-empty-string, array<string>|string> $headers
      */
     public function headers(array $headers): self
     {
@@ -146,6 +161,8 @@ final class Response
 
     /**
      * Set JSON response with success structure
+     *
+     * @param array<mixed> $data
      */
     public static function success(array $data = [], string $message = 'Success', int $status = 200): ResponseInterface
     {
@@ -161,6 +178,8 @@ final class Response
 
     /**
      * Set JSON response with error structure
+     *
+     * @param array<mixed> $errors
      */
     public static function error(string $message = 'Error', int $status = 400, array $errors = []): ResponseInterface
     {
@@ -208,6 +227,8 @@ final class Response
 
     /**
      * Create 201 Created response
+     *
+     * @param array<mixed> $data
      */
     public static function created(array $data = [], string $message = 'Resource created'): ResponseInterface
     {
@@ -233,12 +254,20 @@ final class Response
         string $domain = '',
         bool $secure = false,
         bool $httponly = false,
-        string $samesite = ''
+        string $samesite = '',
     ): self {
+        if ($samesite !== '') {
+            $normalizedSameSite = strtolower($samesite);
+            if (!in_array($normalizedSameSite, ['lax', 'strict', 'none'], true)) {
+                throw new \InvalidArgumentException('Invalid SameSite value. Expected lax, strict, none, or an empty string.');
+            }
+            $samesite = ucfirst($normalizedSameSite);
+        }
+
         $cookieString = sprintf(
             '%s=%s',
             rawurlencode($name),
-            rawurlencode($value)
+            rawurlencode($value),
         );
 
         if ($expires !== 0) {
@@ -295,7 +324,12 @@ final class Response
         }
 
         // Send body
-        echo $this->response->getBody()->getContents();
+        $body = $this->response->getBody();
+        if ($body->isSeekable()) {
+            $body->rewind();
+        }
+
+        echo $body->getContents();
     }
 
     /**
@@ -307,7 +341,7 @@ final class Response
             "HTTP/%s %d %s\r\n",
             $this->response->getProtocolVersion(),
             $this->response->getStatusCode(),
-            $this->response->getReasonPhrase()
+            $this->response->getReasonPhrase(),
         );
 
         foreach ($this->response->getHeaders() as $name => $values) {
@@ -316,36 +350,46 @@ final class Response
             }
         }
 
+        $body = $this->response->getBody();
+        if ($body->isSeekable()) {
+            $body->rewind();
+        }
+
         $output .= "\r\n";
-        $output .= $this->response->getBody()->getContents();
+        $output .= $body->getContents();
 
         return $output;
     }
 
     /**
      * Create response from array (auto-detects content type)
+     *
+     * @param array<string, mixed> $data
+     * @param array<non-empty-string, array<string>|string> $headers
      */
     public static function fromArray(array $data, int $status = 200, array $headers = []): ResponseInterface
     {
-        $instance = new self();
-        
-        if (isset($headers['Content-Type'])) {
-            $contentType = $headers['Content-Type'];
-        } else {
-            $contentType = 'application/json';
-        }
+        $contentType = $headers['Content-Type'] ?? 'application/json';
 
         $headers['Content-Type'] = $contentType;
 
         switch ($contentType) {
             case 'application/json':
-                return $instance->json($data, $status, $headers);
+                return self::json($data, $status, $headers);
             case 'text/html':
-                return $instance->html($data['html'] ?? '', $status, $headers);
+                return self::html((string) ($data['html'] ?? ''), $status, $headers);
             case 'text/plain':
-                return $instance->text($data['text'] ?? '', $status, $headers);
+                return self::text((string) ($data['text'] ?? ''), $status, $headers);
             default:
-                return $instance->json($data, $status, $headers);
+                return self::json($data, $status, $headers);
         }
+    }
+
+    private static function sanitizeDownloadFilename(string $filename): string
+    {
+        $sanitized = preg_replace('/[\r\n"]+/', '', $filename) ?? 'download';
+        $sanitized = trim($sanitized);
+
+        return $sanitized !== '' ? $sanitized : 'download';
     }
 }

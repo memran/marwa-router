@@ -18,6 +18,6 @@ final class Throttle
     public function __construct(
         public int $limit,             // allowed requests
         public int $perSeconds = 60,   // window in seconds
-        public string $key = 'ip'      // "ip" or header name
+        public string $key = 'ip',      // "ip" or header name
     ) {}
 }

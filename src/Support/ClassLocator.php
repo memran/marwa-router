@@ -6,14 +6,15 @@ namespace Marwa\Router\Support;
 
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
-use RegexIterator;
 use ReflectionClass;
+use RegexIterator;
 
 final class ClassLocator
 {
     /**
      * Require all PHP files under the given directories (recursively).
      *
+     * @param string[] $directories
      * @return string[] list of required file paths (realpath)
      */
     public static function requirePhpFiles(array $directories, bool $strict = false): array
@@ -47,6 +48,10 @@ final class ClassLocator
         return $loaded;
     }
 
+    /**
+     * @param string[] $paths
+     * @return array<class-string>
+     */
     private static function pathsToCallableClasses(array $paths): array
     {
         $classes = [];
@@ -57,15 +62,22 @@ final class ClassLocator
             }
 
             $content = file_get_contents($path);
+            if ($content === false) {
+                continue;
+            }
+
             preg_match('/namespace\s+([^;]+);/', $content, $matches);
 
             $namespace = $matches[1] ?? '';
             $className = pathinfo($path, PATHINFO_FILENAME);
+            $fqcn = $namespace ? $namespace . '\\' . $className : $className;
 
-            $classes[] = $namespace ? $namespace . '\\' . $className : $className;
+            if (class_exists($fqcn) || interface_exists($fqcn) || trait_exists($fqcn)) {
+                $classes[] = $fqcn;
+            }
         }
 
-        return $classes;
+        return array_values(array_unique($classes));
     }
 
     /**
@@ -79,20 +91,21 @@ final class ClassLocator
      */
     public static function loadAndCollectClasses(callable $loader, ?array $limitToDirs = null): array
     {
-
-        return self::pathsToCallableClasses($loader());
         $before = get_declared_classes();
-        //var_dump($before);
-        $loaderReturn = $loader(); // may return file list (unused)
-        $after  = get_declared_classes();
-        var_dump($loaderReturn);
+        $loaderReturn = $loader();
+        $after = get_declared_classes();
         $new = array_values(array_diff($after, $before));
-        if (!$new) {
+
+        if ($new === []) {
+            $new = self::pathsToCallableClasses(is_array($loaderReturn) ? $loaderReturn : []);
+        }
+
+        if ($new === []) {
             return [];
         }
+
         if ($limitToDirs === null || $limitToDirs === []) {
-            // No filtering; everything declared during the load is returned.
-            return $new;
+            return array_values(array_unique($new));
         }
 
         // Normalize directories for case-insensitive comparison on Windows
@@ -104,11 +117,7 @@ final class ClassLocator
 
         $kept = [];
         foreach ($new as $fqcn) {
-            try {
-                $rc = new ReflectionClass($fqcn);
-            } catch (\Throwable) {
-                continue;
-            }
+            $rc = new ReflectionClass($fqcn);
             if (!$rc->isUserDefined()) {
                 continue;
             }

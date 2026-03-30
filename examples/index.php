@@ -3,8 +3,8 @@
 declare(strict_types=1);
 require __DIR__ . '/../vendor/autoload.php';
 
-use Marwa\Router\RouterFactory;
 use Marwa\Router\Response;
+use Marwa\Router\RouterFactory;
 use Psr\SimpleCache\CacheInterface;
 
 // Use any PSR-16 cache implementation you like.
@@ -81,7 +81,7 @@ $app->registerFromDirectories([__DIR__ . DIRECTORY_SEPARATOR . 'Controllers']);
 // });
 
 // Run app (reads globals, dispatches, emits)
-$app->setNotFoundHandler(fn($req) => Response::text("Route Not Found"));
+$app->setNotFoundHandler(fn ($req) => Response::text("Route Not Found"));
 
 
 /**

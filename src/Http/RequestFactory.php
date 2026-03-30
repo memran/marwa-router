@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Marwa\Router\Http;
 
-use Laminas\Diactoros\ServerRequestFactory as DiactorosFactory;
 use Laminas\Diactoros\ServerRequest;
+use Laminas\Diactoros\ServerRequestFactory as DiactorosFactory;
 use Laminas\Diactoros\Uri;
 use Psr\Http\Message\ServerRequestInterface;
 
@@ -36,7 +36,7 @@ final class RequestFactory
         array $query = [],
         array $parsedBody = [],
         array $cookies = [],
-        array $files = []
+        array $files = [],
     ): ServerRequestInterface {
         $method = strtoupper((string)($server['REQUEST_METHOD'] ?? 'GET'));
         $uriStr = (string)($server['REQUEST_URI'] ?? '/');
@@ -51,7 +51,7 @@ final class RequestFactory
             $uri,
             $method,
             'php://input',
-            self::extractHeaders($server)
+            self::extractHeaders($server),
         );
 
         $request = $request
@@ -69,7 +69,7 @@ final class RequestFactory
      * Extract headers from $_SERVER-like array (DRY util).
      *
      * @param array<string, mixed> $server
-     * @return array<string, array<int, string>>
+     * @return array<non-empty-string, string>
      */
     private static function extractHeaders(array $server): array
     {
@@ -80,14 +80,14 @@ final class RequestFactory
                 $name  = str_replace('_', '-', strtolower(substr($key, 5)));
                 $parts = array_map('ucfirst', explode('-', $name));
                 $norm  = implode('-', $parts);
-                $headers[$norm] = [(string)$value];
+                $headers[$norm] = (string) $value;
             }
 
             // Content-* headers are not prefixed with HTTP_
             if ($key === 'CONTENT_TYPE') {
-                $headers['Content-Type'] = [(string)$value];
+                $headers['Content-Type'] = (string) $value;
             } elseif ($key === 'CONTENT_LENGTH') {
-                $headers['Content-Length'] = [(string)$value];
+                $headers['Content-Length'] = (string) $value;
             }
         }
 

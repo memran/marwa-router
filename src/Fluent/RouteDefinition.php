@@ -3,14 +3,16 @@
 declare(strict_types=1);
 
 namespace Marwa\Router\Fluent;
+
 use Marwa\Router\RouterFactory;
 
 final class RouteDefinition
 {
-    /** @var array<int,string> */
+    /** @var array<int, string> */
     private array $methods;
     private string $path;
-    /** @var callable|array|string */
+
+    /** @var callable|class-string|array{0: object|class-string, 1: non-empty-string} */
     private $handler;
 
     private ?string $name = null;
@@ -24,11 +26,15 @@ final class RouteDefinition
     /** @var array{limit:int,per:int,key:string}|null */
     private ?array $throttle = null;
 
+    /**
+     * @param array<int, string>|string $methods
+     * @param callable|class-string|array{0: object|class-string, 1: non-empty-string} $handler
+     */
     public function __construct(
         private RouterFactory $factory,
         array|string $methods,
         string $path,
-        callable|array|string $handler
+        callable|array|string $handler,
     ) {
         $this->methods = (array) $methods;
         $this->path    = $path;
@@ -88,7 +94,7 @@ final class RouteDefinition
             $this->middlewares,
             $this->domain,
             $this->where,
-            $this->throttle
+            $this->throttle,
         );
     }
 }

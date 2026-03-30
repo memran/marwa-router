@@ -25,6 +25,7 @@ final class InputBag
         return array_key_exists($key, $this->data);
     }
 
+    /** @return array<string, mixed> */
     public function all(): array
     {
         return $this->data;
@@ -68,6 +69,7 @@ final class InputBag
     }
 
     /**
+     * @param array<string, mixed> $default
      * @return array<string, mixed>
      */
     public function array(string $key, array $default = []): array

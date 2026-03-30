@@ -4,220 +4,219 @@ declare(strict_types=1);
 
 namespace Marwa\Router;
 
-use Exception;
+use Laminas\Diactoros\ResponseFactory;
+use Laminas\HttpHandlerRunner\Emitter\SapiEmitter;
+use League\Route\Http\Exception\NotFoundException;
 use League\Route\Router as LeagueRouter;
 use League\Route\Strategy\ApplicationStrategy;
 use Marwa\Router\Attributes\{
+    Domain as DomainAttr,
+    GroupMiddleware,
     Prefix,
     Route as RouteAttr,
+    Throttle as ThrottleAttr,
     UseMiddleware,
-    GroupMiddleware,
-    Where as WhereAttr,
-    Domain as DomainAttr,
-    Throttle as ThrottleAttr
+    Where as WhereAttr
 };
+use Marwa\Router\Exceptions\FileNotFoundException;
 use Marwa\Router\Exceptions\InvalidRouteDefinitionException;
 use Marwa\Router\Exceptions\RouteConflictException;
+use Marwa\Router\Http\RequestFactory;
 use Marwa\Router\Middleware\ThrottleMiddleware;
 use Marwa\Router\Support\ClassLocator;
-
 use Psr\Container\ContainerInterface;
-use Psr\Http\Message\{ResponseFactoryInterface, ResponseInterface, ServerRequestInterface};
+use Psr\Http\Message\ResponseFactoryInterface;
+use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\ServerRequestInterface;
 use Psr\SimpleCache\CacheInterface;
 use ReflectionAttribute;
 use ReflectionClass;
 use ReflectionMethod;
 
-// PSR-7 implementation & emitter
-use Laminas\Diactoros\ResponseFactory;
-use Laminas\Diactoros\ServerRequestFactory;
-use Laminas\HttpHandlerRunner\Emitter\SapiEmitter;
-use League\Route\Http\Exception\NotFoundException;
-use Marwa\Router\Http\HttpRequest;
-use Marwa\Router\Http\RequestFactory;
-
 final class RouterFactory
 {
-    /** Human-readable route table for dump tool */
     /** @var array<int, array{methods:array<int,string>,path:string,name:?string,controller:?string,action:?string,domain:?string}> */
     private array $registry = [];
 
     private LeagueRouter $router;
-    private $strategy = null;
-
+    private ?ApplicationStrategy $strategy = null;
     private ?ContainerInterface $container;
-    private ResponseFactoryInterface $responseFactory;
     private ?CacheInterface $cache;
 
-    /** @var array<string,true> */
+    /** @var array<string, true> */
     private array $seenRouteKeys = [];
-    /** @var array<string,true> */
-    private array $seenNames = [];
-    /** Enable/disable conflict detection */
-    private bool $detectConflicts = true;
 
-    /** If true, every route matches with and without a trailing slash. */
+    /** @var array<string, true> */
+    private array $seenNames = [];
+
+    private bool $detectConflicts = true;
     private bool $trailingSlashOptional = true;
 
-    /* Not found Hanlder */
+    /** @var null|callable */
     private $notFoundHandler = null;
 
-    /**
-     * Router Fatory constructor 
-     */
     public function __construct(
         ?ContainerInterface $container = null,
         ?ResponseFactoryInterface $responseFactory = null,
         ?CacheInterface $cache = null,
-        ?LeagueRouter $router = null
+        ?LeagueRouter $router = null,
     ) {
-        $this->responseFactory = $responseFactory ?? new ResponseFactory();
-        $this->cache           = $cache;
-        $this->router          = $router ?? new LeagueRouter();
-        $this->container       = $container;
-        if (!is_null($this->container)) {
+        $responseFactory ??= new ResponseFactory();
+        $this->cache = $cache;
+        $this->router = $router ?? new LeagueRouter();
+        $this->container = $container;
+
+        if ($container !== null) {
             $this->setContainer($container);
         }
     }
 
-    // -------------------------------------------------
-    // Public API
-    // -------------------------------------------------
     public function setContainer(ContainerInterface $container): self
     {
         $this->container = $container;
         $this->strategy = new ApplicationStrategy();
-        $this->strategy->setContainer($this->container);
+        $this->strategy->setContainer($container);
         $this->router->setStrategy($this->strategy);
 
         return $this;
     }
-    /** Toggle optional trailing slash matching globally. */
+
     public function setTrailingSlashOptional(bool $on): self
     {
         $this->trailingSlashOptional = $on;
+
         return $this;
     }
 
     public function setCache(CacheInterface $cache): self
     {
         $this->cache = $cache;
+
         return $this;
     }
 
-    /**
-     *  stores route cache
-     */
     public function cacheRoutesTo(string $file): void
     {
-        file_put_contents($file, '<?php return ' . var_export($this->routes(), true) . ';');
+        $directory = dirname($file);
+        if (!is_dir($directory) && !mkdir($directory, 0775, true) && !is_dir($directory)) {
+            throw new \RuntimeException(sprintf('Unable to create route cache directory: %s', $directory));
+        }
+
+        $payload = "<?php\n\ndeclare(strict_types=1);\n\nreturn " . var_export($this->routes(), true) . ";\n";
+        if (file_put_contents($file, $payload, LOCK_EX) === false) {
+            throw new \RuntimeException(sprintf('Unable to write route cache file: %s', $file));
+        }
     }
 
-    /**
-     * load route cache
-     */
     public function loadRoutesFrom(string $file): bool
     {
-        if (!is_file($file)) return false;
-        $this->registry = require $file;
+        if (!is_file($file)) {
+            throw new FileNotFoundException($file);
+        }
+
+        $routes = require $file;
+        if (!is_array($routes)) {
+            throw new \UnexpectedValueException(sprintf('Route cache file must return an array: %s', $file));
+        }
+
+        $this->registry = $routes;
+
         return true;
     }
 
     public function enableConflictDetection(bool $on = true): self
     {
         $this->detectConflicts = $on;
-        return $this;
-    }
-    /**
-     * Allow app code to set a custom 404 renderer on strategies that support it
-     * (i.e., have setNotFoundHandler() method via a shared trait).
-     *
-     * @param callable|\Psr\Http\Server\RequestHandlerInterface $handler
-     */
-    public function setNotFoundHandler(callable $handler): self
-    {
-        $this->notFoundHandler = $handler;
+
         return $this;
     }
 
-    /** Dispatch a PSR-7 request. */
+    public function setNotFoundHandler(callable $handler): self
+    {
+        $this->notFoundHandler = $handler;
+
+        return $this;
+    }
+
     public function dispatch(ServerRequestInterface $request): ResponseInterface
     {
         return $this->router->dispatch($request);
     }
 
-    /** Convenience for SAPI usage (Diactoros ServerRequest + SapiEmitter). */
     public function run(): void
     {
+        $request = RequestFactory::fromGlobals();
+
         try {
-            //$request = ServerRequestFactory::fromGlobals();
-            $request = RequestFactory::fromGlobals();
             $response = $this->dispatch($request);
-            (new SapiEmitter())->emit($response);
         } catch (NotFoundException $e) {
-            if (is_null($this->notFoundHandler)) {
-                throw new Exception("Route Not Found");
-            } else {
-                $response = call_user_func_array($this->notFoundHandler, [$request]);
-                (new SapiEmitter())->emit($response);
+            if ($this->notFoundHandler === null) {
+                throw new \RuntimeException('Route not found.', previous: $e);
             }
+
+            $response = $this->normalizeHandlerResponse(($this->notFoundHandler)($request));
         }
+
+        (new SapiEmitter())->emit($response);
     }
 
-    /** Expose the route table for dump/debug. */
+    /**
+     * @return array<int, array{methods:array<int,string>,path:string,name:?string,controller:?string,action:?string,domain:?string}>
+     */
     public function routes(): array
     {
         return $this->registry;
     }
 
-    // -------------------------------------------------
-    // Attribute scanning (eager registration)
-    // -------------------------------------------------
-
-    /** @param string[] $controllerDirs */
+    /**
+     * @param string[] $controllerDirs
+     */
     public function registerFromDirectories(array $controllerDirs, bool $strict = false): self
     {
-        // Require files, collect classes (Windows-safe path filtering)
         $classes = ClassLocator::loadAndCollectClasses(
-            fn() => ClassLocator::requirePhpFiles($controllerDirs, $strict),
-            $controllerDirs
+            fn (): array => ClassLocator::requirePhpFiles($controllerDirs, $strict),
+            $controllerDirs,
         );
 
-        if (empty($classes)) {
+        if ($classes === []) {
             return $this;
         }
 
         return $this->registerFromClasses($classes);
     }
 
-    /** @param array<class-string> $classNames */
+    /**
+     * @param array<class-string> $classNames
+     */
     public function registerFromClasses(array $classNames): self
     {
         foreach ($classNames as $class) {
             $ref = new ReflectionClass($class);
-            if ($ref->isAbstract() || $ref->isInterface()) continue;
+            if ($ref->isAbstract() || $ref->isInterface()) {
+                continue;
+            }
 
-            $prefixAttr    = $this->firstAttr($ref, Prefix::class)?->newInstance();
-            $prefixPath    = isset($prefixAttr?->path) ? $this->normalizePrefix($prefixAttr->path) : '';
-            $namePrefix    = $prefixAttr?->name ?? null;
+            $prefixAttr = $this->firstAttr($ref, Prefix::class)?->newInstance();
+            $prefixPath = isset($prefixAttr?->path) ? $this->normalizePrefix($prefixAttr->path) : '';
+            $namePrefix = $prefixAttr?->name ?? null;
+            $controllerMiddlewares = array_merge(
+                $this->collectGroupMiddlewares($ref),
+                $this->collectUseMiddlewares($ref),
+            );
+            $where = $this->collectWhere($ref);
+            $domain = $this->firstAttr($ref, DomainAttr::class)?->newInstance()->host ?? null;
+            /** @var ThrottleAttr|null $throttle */
+            $throttle = $this->firstAttr($ref, ThrottleAttr::class)?->newInstance();
 
-            $ctrlMw        = $this->collectUseMiddlewares($ref);   // class @UseMiddleware
-            $groupMw       = $this->collectGroupMiddlewares($ref); // class @GroupMiddleware
-            $allCtrlMw     = array_merge($groupMw, $ctrlMw);       // apply both per-route (eager)
-            $whereCtrl     = $this->collectWhere($ref);            // class @Where
-            $domainCtrl    = $this->firstAttr($ref, DomainAttr::class)?->newInstance()->host ?? null;
-            $throttleClass = $this->firstAttr($ref, ThrottleAttr::class)?->newInstance();
-
-            // EAGER: map routes directly (do NOT use $router->group() which is lazy)
             $this->registerControllerMethods(
                 $this->router,
                 $ref,
-                $allCtrlMw,
+                $controllerMiddlewares,
                 $namePrefix,
                 $prefixPath,
-                $whereCtrl,
-                $domainCtrl,
-                $throttleClass
+                $where,
+                $domain,
+                $throttle,
             );
         }
 
@@ -225,9 +224,9 @@ final class RouterFactory
     }
 
     /**
-     * @param LeagueRouter $target (kept for signature compatibility)
+     * @param ReflectionClass<object> $controller
      * @param array<class-string> $classMiddlewares
-     * @param array<string,string> $classWhere
+     * @param array<string, string> $classWhere
      */
     private function registerControllerMethods(
         LeagueRouter $target,
@@ -237,104 +236,75 @@ final class RouterFactory
         string $groupPrefix = '',
         array $classWhere = [],
         ?string $classDomain = null,
-        ?ThrottleAttr $classThrottle = null
+        ?ThrottleAttr $classThrottle = null,
     ): void {
         foreach ($controller->getMethods(ReflectionMethod::IS_PUBLIC) as $method) {
             $routeAttrs = $method->getAttributes(RouteAttr::class, ReflectionAttribute::IS_INSTANCEOF);
-            if (!$routeAttrs) continue;
+            if ($routeAttrs === []) {
+                continue;
+            }
 
-            // Method-level overrides
-            $methodWhere       = $this->collectWhere($method);
-            $effectiveWhere    = array_merge($classWhere, $methodWhere); // method overrides class
-            $methodDomainAttr  = $this->firstAttr($method, DomainAttr::class)?->newInstance()->host ?? null;
-            $effectiveDomain   = $methodDomainAttr ?? $classDomain;
-            $methodThrottle    = $this->firstAttr($method, ThrottleAttr::class)?->newInstance() ?? null;
+            $methodWhere = $this->collectWhere($method);
+            $effectiveWhere = array_merge($classWhere, $methodWhere);
+            $methodDomain = $this->firstAttr($method, DomainAttr::class)?->newInstance()->host ?? null;
+            $effectiveDomain = $methodDomain ?? $classDomain;
+            /** @var ThrottleAttr|null $methodThrottle */
+            $methodThrottle = $this->firstAttr($method, ThrottleAttr::class)?->newInstance();
             $effectiveThrottle = $methodThrottle ?? $classThrottle;
+            $handler = [$this->resolveController($controller->getName()), $method->getName()];
 
             foreach ($routeAttrs as $attr) {
                 /** @var RouteAttr $routeMeta */
                 $routeMeta = $attr->newInstance();
+                $methods = array_values(array_filter(
+                    array_map(static fn (string $item): string => strtoupper(trim($item)), $routeMeta->methods),
+                    static fn (string $item): bool => $item !== '',
+                ));
 
-                // HTTP methods
-                $methods = array_values(array_filter(array_map(
-                    static fn(string $m) => strtoupper(trim($m)),
-                    is_array($routeMeta->methods) ? $routeMeta->methods : [$routeMeta->methods]
-                ), static fn(string $m) => $m !== ''));
-
-                if (!$methods) {
+                if ($methods === []) {
                     throw new InvalidRouteDefinitionException(sprintf(
                         'Invalid Route attribute (no methods) on %s::%s',
                         $controller->getName(),
-                        $method->getName()
+                        $method->getName(),
                     ));
                 }
 
-                // Path building
-                $childRaw     = (string) $routeMeta->path; // '' | '/{id}' | '{id}'
-                $childWhere   = $this->applyWhere(ltrim($childRaw, '/'), $effectiveWhere);
-                $prettyFull   = $this->joinPath($groupPrefix, $childWhere); // "/api/users" or "/api/users/{id:\d+}"
-                $mappedPath   = $this->toMappable($prettyFull);             // "/api/users[/]" or "/api/users/{id:\d+}[/]"
+                $routeName = $routeMeta->name !== null ? ($namePrefix ?? '') . $routeMeta->name : null;
+                $prettyPath = $this->joinPath(
+                    $groupPrefix,
+                    $this->applyWhere(ltrim((string) $routeMeta->path, '/'), $effectiveWhere),
+                );
+                $mappedPath = $this->toMappable($prettyPath);
 
-                $this->assertUniqueRoute($methods, $prettyFull, $effectiveDomain);
-                $this->assertUniqueName($routeMeta->name ? (($namePrefix ?? '') . $routeMeta->name) : null);
+                $this->assertUniqueRoute($methods, $prettyPath, $effectiveDomain);
+                $this->assertUniqueName($routeName);
 
-                // Handler (container aware)
-                $handler = [$this->resolveController($controller->getName()), $method->getName()];
-                $route = null;
-                foreach ($methods as $httpMethod) {
-                    $route = $this->router->map($httpMethod, $mappedPath, $handler);
-                }
+                $middlewares = array_merge(
+                    $classMiddlewares,
+                    $this->collectUseMiddlewares($method),
+                    $routeMeta->middlewares,
+                );
 
-                // Name
-                if ($routeMeta->name) {
-                    $route->setName(($namePrefix ?? '') . $routeMeta->name);
-                }
+                $this->configureMappedRoutes(
+                    $this->mapRoutes($target, $methods, $mappedPath, $handler),
+                    $routeName,
+                    $middlewares,
+                    $effectiveDomain,
+                    $effectiveThrottle,
+                    sprintf('%s::%s', $controller->getName(), $method->getName()),
+                );
 
-                // Domain (if supported)
-                if ($effectiveDomain && \method_exists($route, 'setHost')) {
-                    $route->setHost($effectiveDomain);
-                }
-
-                // Middlewares: class/group -> method @UseMiddleware -> route-meta middlewares
-                foreach ($classMiddlewares as $mw) {
-                    $route->middleware($this->resolveMiddleware($mw));
-                }
-                foreach ($this->collectUseMiddlewares($method) as $mw) {
-                    $route->middleware($this->resolveMiddleware($mw));
-                }
-                foreach ($routeMeta->middlewares as $mw) {
-                    $route->middleware($this->resolveMiddleware($mw));
-                }
-
-                // Throttle
-                if ($effectiveThrottle) {
-                    if (!$this->cache) {
-                        throw new \RuntimeException('Throttle attribute used but no CacheInterface provided to RouterFactory.');
-                    }
-                    $route->middleware(new ThrottleMiddleware(
-                        $this->cache,
-                        $effectiveThrottle->limit,
-                        $effectiveThrottle->perSeconds,
-                        $effectiveThrottle->key
-                    ));
-                }
-
-                // Record pretty route for dump
                 $this->registry[] = [
-                    'methods'    => $methods,
-                    'path'       => $prettyFull,
-                    'name'       => $routeMeta->name ? (($namePrefix ?? '') . $routeMeta->name) : null,
+                    'methods' => $methods,
+                    'path' => $prettyPath,
+                    'name' => $routeName,
                     'controller' => $controller->getName(),
-                    'action'     => $method->getName(),
-                    'domain'     => $effectiveDomain,
+                    'action' => $method->getName(),
+                    'domain' => $effectiveDomain,
                 ];
             }
         }
     }
-
-    // -------------------------------------------------
-    // Fluent API
-    // -------------------------------------------------
 
     public function fluent(): Fluent\RouteRegistrar
     {
@@ -342,12 +312,10 @@ final class RouterFactory
     }
 
     /**
-     * Low-level manual map used by the fluent layer.
-     *
-     * @param array<int,string>|string    $methods
-     * @param callable|array|string       $handler  (callable or ["Class","method"])
-     * @param array<class-string|object>  $middlewares
-     * @param array<string,string>|null   $where
+     * @param array<int, string>|string $methods
+     * @param callable|class-string|array{0: object|class-string, 1: non-empty-string} $handler
+     * @param array<class-string|object> $middlewares
+     * @param array<string, string>|null $where
      * @param array{limit:int,per:int,key:string}|null $throttle
      */
     public function map(
@@ -358,215 +326,354 @@ final class RouterFactory
         array $middlewares = [],
         ?string $domain = null,
         ?array $where = null,
-        ?array $throttle = null
+        ?array $throttle = null,
     ): self {
         $finalMethods = array_values(array_filter(
-            array_map(static fn(string $m) => strtoupper(trim($m)), (array)$methods),
-            static fn(string $m) => $m !== ''
+            array_map(static fn (string $item): string => strtoupper(trim($item)), (array) $methods),
+            static fn (string $item): bool => $item !== '',
         ));
-        if (!$finalMethods) {
+
+        if ($finalMethods === []) {
             throw new \InvalidArgumentException('map(): at least one HTTP method is required.');
         }
 
-        $child      = ltrim(trim($path), '/');                 // '' ok
-        $childWhere = $this->applyWhere($child, $where ?? []);
-        $pretty     = $this->joinPath('', $childWhere);        // top-level pretty path
-        $mapped     = $this->toMappable($pretty);
+        $child = ltrim(trim($path), '/');
+        $prettyPath = $this->joinPath('', $this->applyWhere($child, $where ?? []));
+        $mappedPath = $this->toMappable($prettyPath);
 
-        // handler normalization
         $controllerName = null;
         $actionName = null;
         $callable = $handler;
-        if (\is_array($handler) && \is_string($handler[0] ?? null) && \is_string($handler[1] ?? null)) {
+        if (is_array($handler) && is_string($handler[0] ?? null) && is_string($handler[1] ?? null) && $handler[1] !== '') {
             $controllerName = $handler[0];
             $actionName = $handler[1];
             $callable = [$this->resolveController($controllerName), $actionName];
         }
 
-        $this->assertUniqueRoute($finalMethods, $pretty === '' ? '/' : $pretty, $domain);
+        $this->assertUniqueRoute($finalMethods, $prettyPath, $domain);
         $this->assertUniqueName($name);
 
-        $route = null;
-        foreach ($finalMethods as $method) {
-            $route = $this->router->map($method, $mapped, $callable);
-        }
-        if ($name && $route) {
-            $route->setName($name);
-        }
-        if ($domain && \method_exists($route, 'setHost')) {
-            $route->setHost($domain);
+        $throttleConfig = null;
+        if ($throttle !== null) {
+            $this->assertValidThrottle((int) $throttle['limit'], (int) $throttle['per'], 'fluent route');
+            $throttleConfig = $throttle;
         }
 
-        foreach ($middlewares as $mw) {
-            $route->middleware($this->resolveMiddleware($mw));
-        }
+        $this->configureMappedRoutes(
+            $this->mapRoutes($this->router, $finalMethods, $mappedPath, $callable),
+            $name,
+            $middlewares,
+            $domain,
+            $throttleConfig === null
+                ? null
+                : new ThrottleAttr((int) $throttleConfig['limit'], (int) $throttleConfig['per'], (string) $throttleConfig['key']),
+            'fluent route',
+        );
 
-        if ($throttle) {
-            if (!$this->cache) {
-                throw new \RuntimeException('map(): throttle provided but CacheInterface not set.');
-            }
-            $route->middleware(new ThrottleMiddleware(
-                $this->cache,
-                (int)$throttle['limit'],
-                (int)$throttle['per'],
-                (string)$throttle['key']
-            ));
-        }
-
-        // Record pretty path (no FastRoute tokens)
         $this->registry[] = [
-            'methods'    => $finalMethods,
-            'path'       => $pretty === '' ? '/' : $pretty,
-            'name'       => $name,
+            'methods' => $finalMethods,
+            'path' => $prettyPath,
+            'name' => $name,
             'controller' => $controllerName,
-            'action'     => $actionName,
-            'domain'     => $domain,
+            'action' => $actionName,
+            'domain' => $domain,
         ];
 
         return $this;
     }
 
-    // -------------------------------------------------
-    // Helpers
-    // -------------------------------------------------
-
     private function resolveController(string $class): object
     {
-        if ($this->container && $this->container->has($class)) return $this->container->get($class);
+        if (!class_exists($class)) {
+            throw new \InvalidArgumentException(sprintf('Controller class does not exist: %s', $class));
+        }
+
+        if ($this->container !== null && $this->container->has($class)) {
+            return $this->container->get($class);
+        }
+
         return new $class();
     }
 
-    /** @param class-string|object $mw */
-    private function resolveMiddleware(string|object $mw): object
+    /**
+     * @param class-string|object $middleware
+     */
+    private function resolveMiddleware(string|object $middleware): object
     {
-        if (\is_object($mw)) return $mw;
-        if ($this->container && $this->container->has($mw)) return $this->container->get($mw);
+        if (is_object($middleware)) {
+            return $middleware;
+        }
 
-        return new $mw();
+        if (!class_exists($middleware)) {
+            throw new \InvalidArgumentException(sprintf('Middleware class does not exist: %s', $middleware));
+        }
+
+        if ($this->container !== null && $this->container->has($middleware)) {
+            return $this->container->get($middleware);
+        }
+
+        return new $middleware();
     }
 
-    /** Pretty join: "/api/users" + "" => "/api/users"; + "{id:\d+}" => "/api/users/{id:\d+}" */
     private function joinPath(string $base, string $child): string
     {
-        $base  = '/' . ltrim(trim($base), '/');
-        $base  = rtrim($base, '/'); // canonical
+        $base = '/' . ltrim(trim($base), '/');
+        $base = rtrim($base, '/');
         $child = ltrim(trim($child), '/');
-        return $child === '' ? ($base === '' ? '/' : $base) : ($base === '' ? '/' . $child : $base . '/' . $child);
+
+        if ($child === '') {
+            return $base === '' ? '/' : $base;
+        }
+
+        return $base === '' ? '/' . $child : $base . '/' . $child;
     }
 
-    /** Convert pretty path to FastRoute pattern with optional trailing slash if enabled. */
     private function toMappable(string $pretty): string
     {
         if ($pretty === '' || $pretty === '/') {
             return '/';
         }
+
         $pretty = '/' . ltrim($pretty, '/');
-        if ($this->trailingSlashOptional) {
-            return rtrim($pretty, '/') . '[/]';
-        }
-        return $pretty;
-    }
 
-    /** Apply {param:regex} constraints unless already present. */
-    private function applyWhere(string $childPath, array $constraints): string
-    {
-        if ($childPath === '' || empty($constraints)) return $childPath;
-
-        return \preg_replace_callback('/\{([a-zA-Z_][a-zA-Z0-9_]*)(?::[^}]+)?\}/', function ($m) use ($constraints) {
-            $name = $m[1];
-            // if already has a regex ( {name:...} ), keep it
-            if (\str_contains($m[0], ':') || !isset($constraints[$name])) {
-                return $m[0];
-            }
-            return '{' . $name . ':' . $constraints[$name] . '}';
-        }, $childPath) ?? $childPath;
-    }
-
-    private function firstAttr(ReflectionClass|ReflectionMethod $ref, string $attribute): ?ReflectionAttribute
-    {
-        $attrs = $ref->getAttributes($attribute, ReflectionAttribute::IS_INSTANCEOF);
-        return $attrs[0] ?? null;
-    }
-
-    /** @return class-string[] */
-    private function collectUseMiddlewares(ReflectionClass|ReflectionMethod $ref): array
-    {
-        $mw = [];
-        foreach ($ref->getAttributes(UseMiddleware::class, ReflectionAttribute::IS_INSTANCEOF) as $attr) {
-            $def = $attr->newInstance();
-            foreach ($def->middlewares as $class) $mw[] = $class;
-        }
-        return $mw;
-    }
-
-    /** @return class-string[] */
-    private function collectGroupMiddlewares(ReflectionClass $ref): array
-    {
-        $mw = [];
-        foreach ($ref->getAttributes(GroupMiddleware::class, ReflectionAttribute::IS_INSTANCEOF) as $attr) {
-            $def = $attr->newInstance();
-            foreach ($def->middlewares as $class) $mw[] = $class;
-        }
-        return $mw;
-    }
-
-    /** @return array<string,string> */
-    private function collectWhere(ReflectionClass|ReflectionMethod $ref): array
-    {
-        $out = [];
-        foreach ($ref->getAttributes(WhereAttr::class, ReflectionAttribute::IS_INSTANCEOF) as $a) {
-            $w = $a->newInstance();
-            $out[$w->param] = $w->pattern;
-        }
-        return $out;
-    }
-
-    private function normalizePrefix(string $p): string
-    {
-        $p = '/' . ltrim(trim($p), '/');
-        return rtrim($p, '/');
+        return $this->trailingSlashOptional ? rtrim($pretty, '/') . '[/]' : $pretty;
     }
 
     /**
-     * Ensure {METHOD, domain, path} is unique.
-     * @param array<int,string> $methods
+     * @param array<string, string> $constraints
+     */
+    private function applyWhere(string $childPath, array $constraints): string
+    {
+        if ($childPath === '' || $constraints === []) {
+            return $childPath;
+        }
+
+        return preg_replace_callback(
+            '/\{([a-zA-Z_][a-zA-Z0-9_]*)(?::[^}]+)?\}/',
+            static function (array $matches) use ($constraints): string {
+                $name = $matches[1];
+                if (str_contains($matches[0], ':') || !isset($constraints[$name])) {
+                    return $matches[0];
+                }
+
+                return '{' . $name . ':' . $constraints[$name] . '}';
+            },
+            $childPath,
+        ) ?? $childPath;
+    }
+
+    /**
+     * @template T of object
+     * @param ReflectionClass<object>|ReflectionMethod $ref
+     * @param class-string<T> $attribute
+     * @return ReflectionAttribute<T>|null
+     */
+    private function firstAttr(ReflectionClass|ReflectionMethod $ref, string $attribute): ?ReflectionAttribute
+    {
+        $attrs = $ref->getAttributes($attribute, ReflectionAttribute::IS_INSTANCEOF);
+
+        return $attrs[0] ?? null;
+    }
+
+    /**
+     * @param ReflectionClass<object>|ReflectionMethod $ref
+     * @return array<class-string>
+     */
+    private function collectUseMiddlewares(ReflectionClass|ReflectionMethod $ref): array
+    {
+        $middlewares = [];
+        foreach ($ref->getAttributes(UseMiddleware::class, ReflectionAttribute::IS_INSTANCEOF) as $attr) {
+            $definition = $attr->newInstance();
+            foreach ($definition->middlewares as $class) {
+                $middlewares[] = $class;
+            }
+        }
+
+        return $middlewares;
+    }
+
+    /**
+     * @param ReflectionClass<object> $ref
+     * @return array<class-string>
+     */
+    private function collectGroupMiddlewares(ReflectionClass $ref): array
+    {
+        $middlewares = [];
+        foreach ($ref->getAttributes(GroupMiddleware::class, ReflectionAttribute::IS_INSTANCEOF) as $attr) {
+            $definition = $attr->newInstance();
+            foreach ($definition->middlewares as $class) {
+                $middlewares[] = $class;
+            }
+        }
+
+        return $middlewares;
+    }
+
+    /**
+     * @param ReflectionClass<object>|ReflectionMethod $ref
+     * @return array<string, string>
+     */
+    private function collectWhere(ReflectionClass|ReflectionMethod $ref): array
+    {
+        $constraints = [];
+        foreach ($ref->getAttributes(WhereAttr::class, ReflectionAttribute::IS_INSTANCEOF) as $attr) {
+            $where = $attr->newInstance();
+            $constraints[$where->param] = $where->pattern;
+        }
+
+        return $constraints;
+    }
+
+    private function normalizePrefix(string $prefix): string
+    {
+        $prefix = '/' . ltrim(trim($prefix), '/');
+
+        return rtrim($prefix, '/');
+    }
+
+    /**
+     * @param array<int, string> $methods
      */
     private function assertUniqueRoute(array $methods, string $prettyPath, ?string $domain): void
     {
-        if (!$this->detectConflicts) return;
+        if (!$this->detectConflicts) {
+            return;
+        }
 
         $path = $this->canonicalPath($prettyPath);
         $host = $this->canonicalDomain($domain);
 
-        foreach ($methods as $m) {
-            $method = strtoupper($m);
-            $key = "{$method}|{$host}|{$path}";
+        foreach ($methods as $methodName) {
+            $method = strtoupper($methodName);
+            $key = sprintf('%s|%s|%s', $method, $host, $path);
+
             if (isset($this->seenRouteKeys[$key])) {
-                throw new RouteConflictException("Duplicate route: {$method} {$path} (domain: {$host})");
+                throw new RouteConflictException(sprintf('Duplicate route: %s %s (domain: %s)', $method, $path, $host));
             }
+
             $this->seenRouteKeys[$key] = true;
         }
     }
 
-    /** Ensure route names are unique (if provided). */
     private function assertUniqueName(?string $name): void
     {
-        if (!$this->detectConflicts || $name === null || $name === '') return;
+        if (!$this->detectConflicts || $name === null || $name === '') {
+            return;
+        }
 
         if (isset($this->seenNames[$name])) {
-            throw new RouteConflictException("Duplicate route name: {$name}");
+            throw new RouteConflictException(sprintf('Duplicate route name: %s', $name));
         }
+
         $this->seenNames[$name] = true;
     }
+
     private function canonicalPath(string $pretty): string
     {
-        // ensure single leading slash, strip trailing slash (except root)
-        $p = '/' . ltrim($pretty, '/');
-        return $p === '/' ? '/' : rtrim($p, '/');
+        $path = '/' . ltrim($pretty, '/');
+
+        return $path === '/' ? '/' : rtrim($path, '/');
     }
 
     private function canonicalDomain(?string $domain): string
     {
         return $domain === null || $domain === '' ? '*' : strtolower($domain);
+    }
+
+    /**
+     * @param array<int, string> $methods
+     * @param callable|class-string|array{0: object|class-string, 1: non-empty-string} $handler
+     * @return array<int, mixed>
+     */
+    private function mapRoutes(LeagueRouter $target, array $methods, string $path, callable|array|string $handler): array
+    {
+        $routes = [];
+        foreach ($methods as $method) {
+            $routes[] = $target->map($method, $path, $handler);
+        }
+
+        return $routes;
+    }
+
+    /**
+     * @param array<int, mixed> $routes
+     * @param array<class-string|object> $middlewares
+     */
+    private function configureMappedRoutes(
+        array $routes,
+        ?string $name,
+        array $middlewares,
+        ?string $domain,
+        ?ThrottleAttr $throttle,
+        string $context,
+    ): void {
+        foreach ($routes as $index => $route) {
+            $this->callRouteMethodIfAvailable($route, 'setName', $name !== null && $name !== '' && $index === 0, $name);
+            $this->callRouteMethodIfAvailable($route, 'setHost', $domain !== null && $domain !== '', $domain);
+
+            foreach ($middlewares as $middleware) {
+                $this->callRouteMethod($route, 'middleware', $this->resolveMiddleware($middleware));
+            }
+
+            if ($throttle !== null) {
+                $this->assertValidThrottle($throttle->limit, $throttle->perSeconds, $context);
+
+                if ($this->cache === null) {
+                    throw new \RuntimeException('Throttle support requires a CacheInterface.');
+                }
+
+                $this->callRouteMethod($route, 'middleware', new ThrottleMiddleware(
+                    $this->cache,
+                    $throttle->limit,
+                    $throttle->perSeconds,
+                    $throttle->key,
+                ));
+            }
+        }
+    }
+
+    private function assertValidThrottle(int $limit, int $perSeconds, string $context): void
+    {
+        if ($limit < 1 || $perSeconds < 1) {
+            throw new InvalidRouteDefinitionException(sprintf(
+                'Invalid throttle configuration for %s. Limit and period must be positive integers.',
+                $context,
+            ));
+        }
+    }
+
+    private function normalizeHandlerResponse(mixed $response): ResponseInterface
+    {
+        if ($response instanceof ResponseInterface) {
+            return $response;
+        }
+
+        if (is_array($response)) {
+            return Response::fromArray($response, 404);
+        }
+
+        if (is_string($response)) {
+            return Response::html($response, 404);
+        }
+
+        throw new \UnexpectedValueException('Not-found handler must return a ResponseInterface, string, or array.');
+    }
+
+    private function callRouteMethodIfAvailable(mixed $route, string $method, bool $condition, mixed ...$arguments): void
+    {
+        if (!$condition || !is_object($route) || !method_exists($route, $method)) {
+            return;
+        }
+
+        $route->{$method}(...$arguments);
+    }
+
+    private function callRouteMethod(mixed $route, string $method, mixed ...$arguments): void
+    {
+        if (!is_object($route) || !method_exists($route, $method)) {
+            throw new \UnexpectedValueException(sprintf('Mapped route is missing required method: %s', $method));
+        }
+
+        $route->{$method}(...$arguments);
     }
 }

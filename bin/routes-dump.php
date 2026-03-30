@@ -16,14 +16,19 @@ use Psr\SimpleCache\CacheInterface;
 // CLI: --dir=path  (repeat)  |  --bootstrap=path/to/bootstrap.php
 $dirs = [];
 $bootstrap = null;
-foreach (array_slice($argv, 1) as $arg) {
-    if (str_starts_with($arg, '--dir='))        $dirs[] = substr($arg, 6);
-    elseif (str_starts_with($arg, '--bootstrap=')) $bootstrap = substr($arg, 12);
+$arguments = $_SERVER['argv'] ?? [];
+foreach (array_slice($arguments, 1) as $arg) {
+    if (str_starts_with($arg, '--dir=')) {
+        $dirs[] = substr($arg, 6);
+    } elseif (str_starts_with($arg, '--bootstrap=')) {
+        $bootstrap = substr($arg, 12);
+    }
 }
 
 
 // Minimal in-memory cache to satisfy throttle if any
-$cache = new class implements CacheInterface {
+$cache = new class () implements CacheInterface {
+    /** @var array<string, array{0: mixed, 1: int}> */
     private array $s = [];
     public function get($key, $default = null): mixed
     {
@@ -44,6 +49,10 @@ $cache = new class implements CacheInterface {
         $this->s = [];
         return true;
     }
+    /**
+     * @param iterable<string> $keys
+     * @return array<string, mixed>
+     */
     public function getMultiple($keys, $default = null): iterable
     {
         $out = [];
@@ -52,6 +61,7 @@ $cache = new class implements CacheInterface {
         }
         return $out;
     }
+    /** @param iterable<string, mixed> $values */
     public function setMultiple($values, $ttl = null): bool
     {
         foreach ($values as $k => $v) {
@@ -72,15 +82,19 @@ $cache = new class implements CacheInterface {
     }
 };
 $app = new RouterFactory(cache: $cache);
+if ($bootstrap !== null) {
+    $app = require $bootstrap;
+    if (!$app instanceof RouterFactory) {
+        fwrite(STDERR, "Bootstrap file must return an instance of Marwa\\Router\\RouterFactory.\n");
+        exit(1);
+    }
+} else {
+    if ($dirs === []) {
+        $dirs[] = __DIR__ . '/../examples/Controllers';
+    }
 
-$app->registerFromDirectories([__DIR__ . '\..\examples\Controllers'], strict: true);
-
-
-$app->fluent()->group(['prefix' => '/api', 'name' => 'api.'], function ($r) {
-    $r->get('/hello', fn() => "hi")->name('hello')->register();
-    $r->get('/hello1', fn() => "hi")->name('hello1')->register();
-    $r->get('/hello2', fn() => "hi")->name('hello2')->register();
-});
+    $app->registerFromDirectories($dirs, strict: true);
+}
 
 $rows = $app->routes();
 
@@ -105,7 +119,7 @@ if (!$rows) {
 
 foreach ($rows as $r) {
     $methods = !empty($r['methods']) ? implode('|', $r['methods']) : '';
-    $path    = $r['path'] ?? '';
+    $path    = $r['path'];
     $name    = $r['name'] ?? '';
     $domain  = $r['domain'] ?? '';
     $handler = (!empty($r['controller']) && !empty($r['action']))

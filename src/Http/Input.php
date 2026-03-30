@@ -5,9 +5,7 @@ declare(strict_types=1);
 namespace Marwa\Router\Http;
 
 use Laminas\Diactoros\ServerRequestFactory;
-use Laminas\Diactoros\ServerRequest;
 use Psr\Http\Message\ServerRequestInterface;
-use Marwa\Support\Arr;
 
 /**
  * Static Laravel-style Input facade built on top of HttpRequest.
@@ -54,6 +52,7 @@ final class Input
 
     // --- Proxy methods to HttpRequest ---
 
+    /** @return array<string, mixed> */
     public static function all(): array
     {
         return self::http()->all();
@@ -108,11 +107,19 @@ final class Input
         return self::http()->url();
     }
 
+    /**
+     * @param array<int, string> $keys
+     * @return array<string, mixed>
+     */
     public static function only(array $keys): array
     {
         return self::http()->only($keys);
     }
 
+    /**
+     * @param array<int, string> $keys
+     * @return array<string, mixed>
+     */
     public static function except(array $keys): array
     {
         return self::http()->except($keys);
@@ -127,9 +134,7 @@ final class Input
      */
     public static function has(string $key): bool
     {
-        $data = self::all();
-
-        return Arr::has($data, $key);
+        return self::hasKey(self::all(), $key);
     }
 
     /**
@@ -137,8 +142,7 @@ final class Input
      */
     public static function exists(string $key): bool
     {
-        $data = self::all();
-        return array_key_exists($key, $data);
+        return self::hasKey(self::all(), $key);
     }
 
     /**
@@ -148,6 +152,8 @@ final class Input
      *   Input::merge(['debug' => true]);
      *
      * Returns the new merged HttpRequest instance.
+     *
+     * @param array<string, mixed> $data
      */
     public static function merge(array $data): HttpRequest
     {
@@ -163,6 +169,35 @@ final class Input
         // Rebind to the Input singleton
         self::setRequest($newReq);
 
+        \assert(self::$instance instanceof HttpRequest);
+
         return self::$instance;
+    }
+
+    /**
+     * Support dot-notation access without depending on external helpers.
+     *
+     * @param array<string, mixed> $data
+     */
+    private static function hasKey(array $data, string $key): bool
+    {
+        if ($key === '') {
+            return false;
+        }
+
+        if (array_key_exists($key, $data)) {
+            return true;
+        }
+
+        $current = $data;
+        foreach (explode('.', $key) as $segment) {
+            if (!is_array($current) || !array_key_exists($segment, $current)) {
+                return false;
+            }
+
+            $current = $current[$segment];
+        }
+
+        return true;
     }
 }

@@ -13,11 +13,12 @@ use Attribute;
 #[Attribute(Attribute::TARGET_CLASS | Attribute::IS_REPEATABLE)]
 final class GroupMiddleware
 {
-    /** @param class-string ...$middlewares */
+    /** @var array<int, class-string> */
     public array $middlewares;
+
+    /** @param class-string ...$middlewares */
     public function __construct(string ...$middlewares)
     {
-        // Assign the variadic parameter to the class property.
-        $this->middlewares = $middlewares;
+        $this->middlewares = array_values($middlewares);
     }
 }

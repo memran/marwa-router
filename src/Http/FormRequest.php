@@ -2,11 +2,9 @@
 
 declare(strict_types=1);
 
-namespace Marwa\Router\Request;
+namespace Marwa\Router\Http;
 
 use Marwa\Router\Contract\ValidatorInterface;
-use Marwa\Router\Http\HttpRequest;
-use Marwa\Router\Http\InputBag;
 use Psr\Http\Message\ServerRequestInterface;
 
 abstract class FormRequest
@@ -77,7 +75,7 @@ abstract class FormRequest
             // Fallback: just merge query + body.
             $this->validated = array_merge(
                 $this->request->getQueryParams(),
-                is_array($this->request->getParsedBody()) ? $this->request->getParsedBody() : []
+                is_array($this->request->getParsedBody()) ? $this->request->getParsedBody() : [],
             );
             return $this->validated;
         }

@@ -3,8 +3,10 @@
 declare(strict_types=1);
 
 namespace Marwa\Router\Fluent;
-use \Marwa\Router\RouterFactory;
+
 use Closure;
+use Marwa\Router\RouterFactory;
+
 final class RouteRegistrar
 {
     private string $groupPrefix = '';
@@ -17,7 +19,7 @@ final class RouteRegistrar
     /** @var array{limit:int,per:int,key:string}|null */
     private ?array $groupThrottle = null;
 
-    public function __construct(private  RouterFactory $factory) {}
+    public function __construct(private RouterFactory $factory) {}
 
     /**
      * @param array{
@@ -43,31 +45,46 @@ final class RouteRegistrar
         $routes($child);
     }
 
+    /** @param callable|class-string|array{0: object|class-string, 1: non-empty-string} $handler */
     public function get(string $path, callable|array|string $handler): RouteDefinition
     {
         return $this->def(['GET'], $path, $handler);
     }
+
+    /** @param callable|class-string|array{0: object|class-string, 1: non-empty-string} $handler */
     public function post(string $path, callable|array|string $handler): RouteDefinition
     {
         return $this->def(['POST'], $path, $handler);
     }
+
+    /** @param callable|class-string|array{0: object|class-string, 1: non-empty-string} $handler */
     public function put(string $path, callable|array|string $handler): RouteDefinition
     {
         return $this->def(['PUT'], $path, $handler);
     }
+
+    /** @param callable|class-string|array{0: object|class-string, 1: non-empty-string} $handler */
     public function patch(string $path, callable|array|string $handler): RouteDefinition
     {
         return $this->def(['PATCH'], $path, $handler);
     }
+
+    /** @param callable|class-string|array{0: object|class-string, 1: non-empty-string} $handler */
     public function delete(string $path, callable|array|string $handler): RouteDefinition
     {
         return $this->def(['DELETE'], $path, $handler);
     }
+
+    /** @param callable|class-string|array{0: object|class-string, 1: non-empty-string} $handler */
     public function any(string $path, callable|array|string $handler): RouteDefinition
     {
         return $this->def(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], $path, $handler);
     }
 
+    /**
+     * @param array<int, string> $methods
+     * @param callable|class-string|array{0: object|class-string, 1: non-empty-string} $handler
+     */
     private function def(array $methods, string $path, callable|array|string $handler): RouteDefinition
     {
         $fullPath = $this->join($this->groupPrefix, $path);
@@ -95,14 +112,20 @@ final class RouteRegistrar
     {
         $base  = '/' . ltrim(trim($base), '/');
         $child = ltrim(trim($child), '/');
-        if ($base === '/' && $child === '') return '/';
-        if ($child === '') return $base;
+        if ($base === '/' && $child === '') {
+            return '/';
+        }
+        if ($child === '') {
+            return $base;
+        }
         return rtrim($base, '/') . '/' . $child;
     }
 
     private function joinName(?string $a, ?string $b): ?string
     {
-        if (!$a && !$b) return null;
+        if (!$a && !$b) {
+            return null;
+        }
         return (string)($a ?? '') . (string)($b ?? '');
     }
 }

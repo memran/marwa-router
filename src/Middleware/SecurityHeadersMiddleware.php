@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Marwa\Router\Middleware;
 
-use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\ResponseInterface;
-use Psr\Http\Server\RequestHandlerInterface;
+use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
+use Psr\Http\Server\RequestHandlerInterface;
 
 /**
  * Adds conservative security headers (tweak CSP for your app).
@@ -15,7 +15,7 @@ use Psr\Http\Server\MiddlewareInterface;
 final class SecurityHeadersMiddleware implements MiddlewareInterface
 {
     public function __construct(
-        private string $csp = "default-src 'self'; frame-ancestors 'none'; base-uri 'self'"
+        private string $csp = "default-src 'self'; frame-ancestors 'none'; base-uri 'self'",
     ) {}
 
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface

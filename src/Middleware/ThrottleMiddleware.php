@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace Marwa\Router\Middleware;
 
-use Psr\SimpleCache\CacheInterface;
+use Laminas\Diactoros\Response\JsonResponse;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\{MiddlewareInterface, RequestHandlerInterface};
-use Laminas\Diactoros\Response\JsonResponse;
+use Psr\SimpleCache\CacheInterface;
 
 /**
  * PSR-16-based throttle.
@@ -21,7 +21,7 @@ final class ThrottleMiddleware implements MiddlewareInterface
         private CacheInterface $cache,
         private int $limit,
         private int $perSeconds = 60,
-        private string $key = 'ip' // 'ip' or header name (e.g. 'X-API-Key')
+        private string $key = 'ip', // 'ip' or header name (e.g. 'X-API-Key')
     ) {}
 
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface

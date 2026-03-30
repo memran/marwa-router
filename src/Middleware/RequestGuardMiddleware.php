@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace Marwa\Router\Middleware;
 
 use Laminas\Diactoros\Response\JsonResponse;
-use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\ResponseInterface;
-use Psr\Http\Server\RequestHandlerInterface;
+use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
+use Psr\Http\Server\RequestHandlerInterface;
 
 /**
  * Hard checks on method, path, headers, and payload size.
@@ -20,7 +20,7 @@ final class RequestGuardMiddleware implements MiddlewareInterface
         private array $allowedMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
         private int $maxContentLength = 2_000_000, // 2 MB
         private bool $rejectAmbiguousHosts = true,
-        private bool $rejectControlChars = true
+        private bool $rejectControlChars = true,
     ) {}
 
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
@@ -48,7 +48,9 @@ final class RequestGuardMiddleware implements MiddlewareInterface
         // Path & query control characters
         if ($this->rejectControlChars) {
             $path = $request->getUri()->getPath();
-            if ($this->hasCtl($path)) return new JsonResponse(['message' => 'Bad Request'], 400);
+            if ($this->hasCtl($path)) {
+                return new JsonResponse(['message' => 'Bad Request'], 400);
+            }
             foreach ($request->getQueryParams() as $k => $v) {
                 if ($this->hasCtl((string)$k) || $this->hasCtl((string)$v)) {
                     return new JsonResponse(['message' => 'Bad Request'], 400);
@@ -73,7 +75,7 @@ final class RequestGuardMiddleware implements MiddlewareInterface
 
     private function normalizePath(string $p): string
     {
-        $parts = array_values(array_filter(explode('/', $p), fn($x) => $x !== '' && $x !== '.'));
+        $parts = array_values(array_filter(explode('/', $p), fn ($x) => $x !== '' && $x !== '.'));
         $stack = [];
         foreach ($parts as $seg) {
             if ($seg === '..') {

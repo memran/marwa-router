@@ -14,7 +14,7 @@ final class UploadedFiles
 {
     /**
      * @param array<string, mixed> $files
-     * @return array<string, UploadedFileInterface|array>
+     * @return array<string, mixed>
      */
     public static function normalize(array $files): array
     {
@@ -28,13 +28,7 @@ final class UploadedFiles
                 continue;
             }
 
-            $normalized[$field] = $factory->createUploadedFile(
-                stream: is_string($spec['tmp_name']) && $spec['tmp_name'] !== '' ? self::streamFromPath($spec['tmp_name']) : null,
-                size: isset($spec['size']) ? (int)$spec['size'] : null,
-                error: isset($spec['error']) ? (int)$spec['error'] : \UPLOAD_ERR_OK,
-                clientFilename: isset($spec['name']) ? (string)$spec['name'] : null,
-                clientMediaType: isset($spec['type']) ? (string)$spec['type'] : null
-            );
+            $normalized[$field] = self::createUploadedFileFromSpec($factory, $spec);
         }
 
         return $normalized;
@@ -62,13 +56,12 @@ final class UploadedFiles
                     'type'     => $node['type'][$idx] ?? '',
                 ];
 
-                $out[$idx] = $factory->createUploadedFile(
-                    stream: is_string($spec['tmp_name']) && $spec['tmp_name'] !== '' ? self::streamFromPath($spec['tmp_name']) : null,
-                    size: isset($spec['size']) ? (int)$spec['size'] : null,
-                    error: isset($spec['error']) ? (int)$spec['error'] : \UPLOAD_ERR_OK,
-                    clientFilename: isset($spec['name']) ? (string)$spec['name'] : null,
-                    clientMediaType: isset($spec['type']) ? (string)$spec['type'] : null
-                );
+                if (is_array($spec['tmp_name'])) {
+                    $out[$idx] = self::normalizeNested($spec, $factory);
+                    continue;
+                }
+
+                $out[$idx] = self::createUploadedFileFromSpec($factory, $spec);
             }
             return $out;
         }
@@ -79,6 +72,22 @@ final class UploadedFiles
             $out[$k] = self::normalizeNested($v, $factory);
         }
         return $out;
+    }
+
+    /** @param array<string, mixed> $spec */
+    private static function createUploadedFileFromSpec(UploadedFileFactory $factory, array $spec): UploadedFileInterface
+    {
+        $stream = is_string($spec['tmp_name']) && $spec['tmp_name'] !== ''
+            ? self::streamFromPath($spec['tmp_name'])
+            : new \Laminas\Diactoros\Stream('php://temp', 'rb+');
+
+        return $factory->createUploadedFile(
+            stream: $stream,
+            size: (int) $spec['size'],
+            error: (int) $spec['error'],
+            clientFilename: $spec['name'] !== '' ? (string) $spec['name'] : null,
+            clientMediaType: $spec['type'] !== '' ? (string) $spec['type'] : null,
+        );
     }
 
     private static function streamFromPath(string $path): \Psr\Http\Message\StreamInterface

@@ -17,6 +17,6 @@ final class Where
 {
     public function __construct(
         public string $param,
-        public string $pattern
+        public string $pattern,
     ) {}
 }

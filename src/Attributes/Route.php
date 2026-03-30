@@ -33,7 +33,7 @@ final class Route
         string|array $methods,
         string $path,
         ?string $name = null,
-        array $middlewares = []
+        array $middlewares = [],
     ) {
         $this->methods     = is_array($methods) ? $methods : [$methods];
         $this->path        = $path;
