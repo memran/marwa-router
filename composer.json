@@ -19,7 +19,7 @@
     }
   ],
   "require": {
-    "php": "^8.1",
+    "php": "^8.2",
     "laminas/laminas-diactoros": "^3.0",
     "laminas/laminas-httphandlerrunner": "^2.6",
     "league/route": "^6.2",
@@ -65,6 +65,9 @@
   "config": {
     "sort-packages": true,
     "optimize-autoloader": true,
-    "minimum-stability": "dev"
+    "minimum-stability": "dev",
+    "platform": {
+      "php": "8.2.0"
+    }
   }
 }

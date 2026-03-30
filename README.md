@@ -1,10 +1,10 @@
 # Marwa Router
 
-Marwa Router is a lightweight PHP 8.1+ routing library built on top of `league/route`. It supports PHP 8 attributes, a fluent route builder, PSR-7 requests, PSR-15 middleware, and PSR-16-backed throttling.
+Marwa Router is a lightweight PHP 8.2+ routing library built on top of `league/route`. It supports PHP 8 attributes, a fluent route builder, PSR-7 requests, PSR-15 middleware, and PSR-16-backed throttling.
 
 ## Requirements
 
-- PHP 8.1 or newer
+- PHP 8.2 or newer
 - Composer
 
 ## Installation
