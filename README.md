@@ -1,6 +1,8 @@
 # Marwa Router
 
 [![CI](https://img.shields.io/github/actions/workflow/status/memran/marwa-router/ci.yml?branch=main&label=CI)](https://github.com/memran/marwa-router/actions/workflows/ci.yml)
+[![PHPUnit](https://img.shields.io/badge/PHPUnit-11.x-0E9F6E)](#development)
+[![PHPStan](https://img.shields.io/badge/PHPStan-2.x-6B46C1)](#development)
 [![Packagist Version](https://img.shields.io/packagist/v/memran/marwa-router)](https://packagist.org/packages/memran/marwa-router)
 [![PHP Version](https://img.shields.io/packagist/php-v/memran/marwa-router)](https://packagist.org/packages/memran/marwa-router)
 [![Packagist Downloads](https://img.shields.io/packagist/dt/memran/marwa-router)](https://packagist.org/packages/memran/marwa-router)
