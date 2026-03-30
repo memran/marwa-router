@@ -196,9 +196,10 @@ final class RouterFactory
                 continue;
             }
 
+            /** @var Prefix|null $prefixAttr */
             $prefixAttr = $this->firstAttr($ref, Prefix::class)?->newInstance();
-            $prefixPath = isset($prefixAttr?->path) ? $this->normalizePrefix($prefixAttr->path) : '';
-            $namePrefix = $prefixAttr?->name ?? null;
+            $prefixPath = $prefixAttr !== null ? $this->normalizePrefix($prefixAttr->path) : '';
+            $namePrefix = $prefixAttr !== null ? $prefixAttr->name : null;
             $controllerMiddlewares = array_merge(
                 $this->collectGroupMiddlewares($ref),
                 $this->collectUseMiddlewares($ref),
