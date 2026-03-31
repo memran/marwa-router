@@ -8,6 +8,10 @@ use Laminas\Diactoros\ServerRequest;
 use Laminas\Diactoros\Stream;
 use Laminas\Diactoros\Uri;
 use Marwa\Router\Middleware\BodyParsingMiddleware;
+use Marwa\Router\Middleware\ContentTypeMiddleware;
+use Marwa\Router\Middleware\RequestGuardMiddleware;
+use Marwa\Router\Middleware\SecurityHeadersMiddleware;
+use Marwa\Router\Response;
 use Marwa\Router\RouterFactory;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\ResponseInterface;
@@ -45,6 +49,112 @@ final class MiddlewareIntegrationTest extends TestCase
         self::assertSame('Throttle limit exceeded.', $logger->records[0]['message'] ?? null);
     }
 
+    public function testContentTypeMiddlewareRejectsUnsupportedMediaTypeAndInvalidJson(): void
+    {
+        $router = new RouterFactory();
+        $router->map(
+            'POST',
+            '/api/posts',
+            static fn (ServerRequest $request): ResponseInterface => Response::json([
+                'payload' => $request->getParsedBody(),
+            ]),
+            middlewares: [new ContentTypeMiddleware()],
+        );
+
+        $unsupported = $router->handle($this->requestWithBody(
+            '/api/posts',
+            'POST',
+            '{"title":"Example"}',
+            [
+                'Content-Type' => ['text/plain'],
+                'Host' => ['example.com'],
+            ],
+        ));
+
+        self::assertSame(415, $unsupported->getStatusCode());
+        self::assertStringContainsString('Unsupported Media Type', (string) $unsupported->getBody());
+
+        $invalidJson = $router->handle($this->requestWithBody(
+            '/api/posts',
+            'POST',
+            '{"title":',
+            [
+                'Content-Type' => ['application/json'],
+                'Host' => ['example.com'],
+            ],
+        ));
+
+        self::assertSame(400, $invalidJson->getStatusCode());
+        self::assertStringContainsString('Invalid JSON', (string) $invalidJson->getBody());
+    }
+
+    public function testRequestGuardMiddlewareRejectsBadHostsAndOversizedPayloads(): void
+    {
+        $router = new RouterFactory();
+        $router->map(
+            'POST',
+            '/admin/users',
+            static fn (): ResponseInterface => Response::text('guarded'),
+            middlewares: [new RequestGuardMiddleware()],
+        );
+
+        $badHost = $router->handle(new ServerRequest(
+            [],
+            [],
+            new Uri('https://example.com/admin/users'),
+            'POST',
+            'php://memory',
+            ['Host' => ['bad host']],
+        ));
+
+        self::assertSame(400, $badHost->getStatusCode());
+        self::assertStringContainsString('Bad Host header', (string) $badHost->getBody());
+
+        $tooLarge = $router->handle(new ServerRequest(
+            [],
+            [],
+            new Uri('https://example.com/admin/users'),
+            'POST',
+            'php://memory',
+            [
+                'Host' => ['example.com'],
+                'Content-Length' => ['2000001'],
+            ],
+        ));
+
+        self::assertSame(413, $tooLarge->getStatusCode());
+        self::assertStringContainsString('Payload Too Large', (string) $tooLarge->getBody());
+    }
+
+    public function testSecurityHeadersMiddlewareAddsConservativeHeaders(): void
+    {
+        $router = new RouterFactory();
+        $router->map(
+            'GET',
+            '/secure',
+            static fn (): ResponseInterface => Response::text('ok'),
+            middlewares: [new SecurityHeadersMiddleware()],
+        );
+
+        $response = $router->handle(new ServerRequest(
+            [],
+            [],
+            new Uri('https://example.com/secure'),
+            'GET',
+            'php://memory',
+            ['Host' => ['example.com']],
+        ));
+
+        self::assertSame('nosniff', $response->getHeaderLine('X-Content-Type-Options'));
+        self::assertSame('DENY', $response->getHeaderLine('X-Frame-Options'));
+        self::assertSame('no-referrer', $response->getHeaderLine('Referrer-Policy'));
+        self::assertSame('geolocation=(), microphone=()', $response->getHeaderLine('Permissions-Policy'));
+        self::assertSame(
+            "default-src 'self'; frame-ancestors 'none'; base-uri 'self'",
+            $response->getHeaderLine('Content-Security-Policy'),
+        );
+    }
+
     private function jsonRequest(string $path, array $payload): ServerRequest
     {
         $stream = new Stream('php://temp', 'wb+');
@@ -58,6 +168,25 @@ final class MiddlewareIntegrationTest extends TestCase
             'POST',
             $stream,
             ['Content-Type' => ['application/json']],
+        );
+    }
+
+    /**
+     * @param array<string, array<string>> $headers
+     */
+    private function requestWithBody(string $path, string $method, string $body, array $headers): ServerRequest
+    {
+        $stream = new Stream('php://temp', 'wb+');
+        $stream->write($body);
+        $stream->rewind();
+
+        return new ServerRequest(
+            [],
+            [],
+            new Uri('https://example.com' . $path),
+            $method,
+            $stream,
+            $headers,
         );
     }
 }

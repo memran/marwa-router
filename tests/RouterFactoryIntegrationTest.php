@@ -124,6 +124,26 @@ final class RouterFactoryIntegrationTest extends TestCase
         }
     }
 
+    public function testMetadataRouteCacheCanRestoreRouteRegistry(): void
+    {
+        $router = new RouterFactory();
+        $router->registerFromClasses([AttributeDomainController::class]);
+
+        $cacheFile = tempnam(sys_get_temp_dir(), 'route-metadata');
+        self::assertNotFalse($cacheFile);
+
+        try {
+            $router->cacheRoutesTo($cacheFile);
+
+            $cachedRouter = new RouterFactory();
+            $cachedRouter->loadRoutesFrom($cacheFile);
+
+            self::assertSame($router->routes(), $cachedRouter->routes());
+        } finally {
+            @unlink($cacheFile);
+        }
+    }
+
     public function testLoggerReceivesNotFoundEvents(): void
     {
         $logger = new IntegrationLogger();

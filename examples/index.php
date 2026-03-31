@@ -85,16 +85,16 @@ $app->setNotFoundHandler(fn ($req) => Response::text("Route Not Found"));
 
 
 /**
- * $app->use(new \Marwa\Request\Http\Middleware\RequestGuardMiddleware(
+ * $app->use(new \Marwa\Router\Middleware\RequestGuardMiddleware(
  *   allowedMethods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
  *   maxContentLength: 2_000_000
  *));
- *$app->use(new \Marwa\Request\Http\Middleware\ContentTypeMiddleware(
+ * $app->use(new \Marwa\Router\Middleware\ContentTypeMiddleware(
  *   requireJsonForWrites: true,
  *   maxJsonBytes: 1_000_000,
  *   maxJsonDepth: 32
  *));
- * $app->use(new \Marwa\Request\Http\Middleware\SecurityHeadersMiddleware());
+ * $app->use(new \Marwa\Router\Middleware\SecurityHeadersMiddleware());
  */
 
 $app->run();
