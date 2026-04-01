@@ -159,6 +159,40 @@ final class RouterFactoryIntegrationTest extends TestCase
             self::assertSame('Route not found.', $logger->records[0]['message'] ?? null);
         }
     }
+
+    public function testFluentRouteDefinitionRegistersWithoutExplicitRegisterCall(): void
+    {
+        $router = new RouterFactory();
+
+        $router->fluent()
+            ->get('/ping', static fn (): ResponseInterface => Response::text('pong'))
+            ->name('ping');
+
+        gc_collect_cycles();
+
+        $response = $router->handle(RequestFactory::fromArrays(
+            server: ['REQUEST_URI' => '/ping', 'REQUEST_METHOD' => 'GET'],
+        ));
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame('pong', (string) $response->getBody());
+        self::assertSame('ping', $router->routes()[0]['name'] ?? null);
+    }
+
+    public function testFluentRouteDefinitionRegisterRemainsIdempotent(): void
+    {
+        $router = new RouterFactory();
+
+        $router->fluent()
+            ->get('/health', static fn (): ResponseInterface => Response::text('ok'))
+            ->name('health')
+            ->register();
+
+        gc_collect_cycles();
+
+        self::assertCount(1, $router->routes());
+        self::assertSame('/health', $router->routes()[0]['path']);
+    }
 }
 
 #[Prefix('/admin', name: 'admin.')]

@@ -65,8 +65,7 @@ $router = new RouterFactory();
 
 $router->fluent()
     ->get('/', fn () => Response::json(['ok' => true]))
-    ->name('home')
-    ->register();
+    ->name('home');
 
 $router->setNotFoundHandler(fn () => Response::text('Route Not Found', 404));
 $router->run();
@@ -152,17 +151,16 @@ final class UserController
 ### 3. Add Fluent Routes
 
 Use fluent routes for closures, bootstrap-only endpoints, or when you prefer explicit configuration.
+Route definitions register automatically when the definition goes out of scope; `->register()` is still available when you want to force registration immediately.
 
 ```php
 $router->fluent()->group(['prefix' => '/api', 'name' => 'api.'], function ($routes): void {
     $routes->get('/ping', fn () => Response::text('pong'))
-        ->name('ping')
-        ->register();
+        ->name('ping');
 
     $routes->get('/posts/{slug}', [\App\Controller\PostController::class, 'show'])
         ->where('slug', '[a-z0-9-]+')
-        ->name('posts.show')
-        ->register();
+        ->name('posts.show');
 });
 ```
 
@@ -209,14 +207,19 @@ Fluent example:
 $router->fluent()
     ->post('/api/login', [AuthController::class, 'login'])
     ->throttle(10, 60, 'ip')
-    ->name('api.login')
-    ->register();
+    ->name('api.login');
 ```
 
 Included middleware classes live in `src/Middleware/`:
 
+- `AuthTokenMiddleware`
 - `BodyParsingMiddleware`
 - `ContentTypeMiddleware`
+- `CorsMiddleware`
+- `CsrfMiddleware`
+- `ExceptionToResponseMiddleware`
+- `MaintenanceModeMiddleware`
+- `RequestIdMiddleware`
 - `RequestGuardMiddleware`
 - `SecurityHeadersMiddleware`
 - `ThrottleMiddleware`
@@ -355,8 +358,7 @@ $router->fluent()
     ->where('year', '\d{4}')
     ->domain('reports.example.com')
     ->middleware(\App\Middleware\AuditMiddleware::class)
-    ->name('reports.show')
-    ->register();
+    ->name('reports.show');
 ```
 
 Route group with shared prefix, name prefix, and throttling:
@@ -368,8 +370,7 @@ $router->fluent()->group([
     'throttle' => ['limit' => 60, 'per' => 60, 'key' => 'ip'],
 ], function ($routes): void {
     $routes->get('/users', [UserController::class, 'index'])
-        ->name('users.index')
-        ->register();
+        ->name('users.index');
 });
 ```
 

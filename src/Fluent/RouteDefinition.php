@@ -25,6 +25,7 @@ final class RouteDefinition
     private ?string $domain = null;
     /** @var array{limit:int,per:int,key:string}|null */
     private ?array $throttle = null;
+    private bool $registered = false;
 
     /**
      * @param array<int, string>|string $methods
@@ -81,6 +82,11 @@ final class RouteDefinition
 
     public function register(): RouterFactory
     {
+        if ($this->registered) {
+            return $this->factory;
+        }
+
+        $this->registered = true;
         $finalName = $this->name;
         if ($this->namePrefix && $this->name !== null) {
             $finalName = $this->namePrefix . $this->name;
@@ -96,5 +102,14 @@ final class RouteDefinition
             $this->where,
             $this->throttle,
         );
+    }
+
+    public function __destruct()
+    {
+        if ($this->registered) {
+            return;
+        }
+
+        $this->register();
     }
 }
