@@ -389,10 +389,10 @@ final class RouterFactory
         $controllerName = null;
         $actionName = null;
         $callable = $handler;
-        if (is_array($handler) && is_string($handler[0] ?? null) && is_string($handler[1] ?? null) && $handler[1] !== '') {
+        if (is_array($handler) && is_string($handler[0])) {
             $controllerName = $handler[0];
             $actionName = $handler[1];
-            $callable = [$this->resolveController($controllerName), $actionName];
+            $callable = [$this->resolveController($handler[0]), $handler[1]];
         }
 
         $this->assertUniqueRoute($finalMethods, $prettyPath, $domain);

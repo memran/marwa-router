@@ -38,7 +38,7 @@ final class RouteRegistrar
         $child->groupPrefix      = $this->join($this->groupPrefix, (string)($opts['prefix'] ?? ''));
         $child->groupNamePrefix  = $this->joinName($this->groupNamePrefix, $opts['name'] ?? null);
         $child->groupDomain      = $opts['domain'] ?? $this->groupDomain;
-        $child->groupWhere       = ($this->groupWhere ?? []) + (array)($opts['where'] ?? []);
+        $child->groupWhere       = $this->groupWhere + (array)($opts['where'] ?? []);
         $child->groupMiddlewares = array_merge($this->groupMiddlewares, (array)($opts['middleware'] ?? []));
         $child->groupThrottle    = $opts['throttle'] ?? $this->groupThrottle;
 

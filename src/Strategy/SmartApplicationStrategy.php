@@ -32,7 +32,7 @@ final class SmartApplicationStrategy extends ApplicationStrategy
 
     private function countCallableParameters(callable $controller): int
     {
-        if (is_array($controller) && is_string($controller[1])) {
+        if (is_array($controller)) {
             $ref = new ReflectionMethod($controller[0], $controller[1]);
             return $ref->getNumberOfParameters();
         }

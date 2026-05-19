@@ -176,7 +176,7 @@ PHP;
             return $handler;
         }
 
-        if (is_array($handler) && is_string($handler[0] ?? null) && is_string($handler[1] ?? null) && $handler[1] !== '') {
+        if (is_array($handler)) {
             /** @var class-string $class */
             $class = $handler[0];
 
