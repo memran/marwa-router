@@ -8,7 +8,6 @@ use Laminas\Diactoros\ResponseFactory;
 use Laminas\HttpHandlerRunner\Emitter\SapiEmitter;
 use League\Route\Http\Exception\NotFoundException;
 use League\Route\Router as LeagueRouter;
-use League\Route\Strategy\ApplicationStrategy;
 use Marwa\Router\Attributes\{
     Domain as DomainAttr,
     GroupMiddleware,
@@ -24,6 +23,7 @@ use Marwa\Router\Exceptions\RouteConflictException;
 use Marwa\Router\Exceptions\RouteNotFoundException;
 use Marwa\Router\Http\RequestFactory;
 use Marwa\Router\Middleware\ThrottleMiddleware;
+use Marwa\Router\Strategy\SmartApplicationStrategy;
 use Marwa\Router\Support\ClassLocator;
 use Marwa\Router\Support\RouteCache;
 use Psr\Container\ContainerInterface;
@@ -42,7 +42,7 @@ final class RouterFactory
     private array $registry = [];
 
     private LeagueRouter $router;
-    private ?ApplicationStrategy $strategy = null;
+    private ?SmartApplicationStrategy $strategy = null;
     private ?ContainerInterface $container;
     private ?CacheInterface $cache;
     private ?LoggerInterface $logger = null;
@@ -83,7 +83,7 @@ final class RouterFactory
     public function setContainer(ContainerInterface $container): self
     {
         $this->container = $container;
-        $this->strategy = new ApplicationStrategy();
+        $this->strategy = new SmartApplicationStrategy();
         $this->strategy->setContainer($container);
         $this->router->setStrategy($this->strategy);
 
