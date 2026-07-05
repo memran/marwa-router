@@ -64,7 +64,7 @@
       "@test",
       "@lint"
     ],
-    "benchmark": "phpbench run --report=default --output=ansi"
+    "benchmark": "phpbench run --report=default"
   },
   "config": {
     "sort-packages": true,
