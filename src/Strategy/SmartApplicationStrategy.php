@@ -61,14 +61,16 @@ final class SmartApplicationStrategy extends ApplicationStrategy
     {
         if (is_array($controller)) {
             $class = is_object($controller[0]) ? get_class($controller[0]) : $controller[0];
+
             return $class . '::' . $controller[1];
         }
         if ($controller instanceof \Closure) {
             return 'closure#' . spl_object_id($controller);
         }
         if (is_object($controller)) {
-            return get_class($controller) . '#' . spl_object_id($controller);
+            return get_class($controller);
         }
+
         return (string) $controller;
     }
 }

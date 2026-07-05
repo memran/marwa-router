@@ -280,15 +280,20 @@ final class RouterFactory
             /** @var ThrottleAttr|null $methodThrottle */
             $methodThrottle = $this->firstAttr($method, ThrottleAttr::class)?->newInstance();
             $effectiveThrottle = $methodThrottle ?? $classThrottle;
-            $handler = [$this->resolveController($controller->getName()), $method->getName()];
+            $resolvedController = $this->resolveController($controller->getName());
+            $handler = [$resolvedController, $method->getName()];
+            $methodMiddlewares = $this->collectUseMiddlewares($method);
 
             foreach ($routeAttrs as $attr) {
                 /** @var RouteAttr $routeMeta */
                 $routeMeta = $attr->newInstance();
-                $methods = array_values(array_filter(
-                    array_map(static fn (string $item): string => strtoupper(trim($item)), $routeMeta->methods),
-                    static fn (string $item): bool => $item !== '',
-                ));
+                $methods = [];
+                foreach ($routeMeta->methods as $item) {
+                    $m = strtoupper(trim($item));
+                    if ($m !== '') {
+                        $methods[] = $m;
+                    }
+                }
 
                 if ($methods === []) {
                     throw new InvalidRouteDefinitionException(sprintf(
@@ -310,7 +315,7 @@ final class RouterFactory
 
                 $middlewares = array_merge(
                     $classMiddlewares,
-                    $this->collectUseMiddlewares($method),
+                    $methodMiddlewares,
                     $routeMeta->middlewares,
                 );
 
@@ -373,10 +378,13 @@ final class RouterFactory
         ?array $where = null,
         ?array $throttle = null,
     ): self {
-        $finalMethods = array_values(array_filter(
-            array_map(static fn (string $item): string => strtoupper(trim($item)), (array) $methods),
-            static fn (string $item): bool => $item !== '',
-        ));
+        $finalMethods = [];
+        foreach ((array) $methods as $item) {
+            $m = strtoupper(trim($item));
+            if ($m !== '') {
+                $finalMethods[] = $m;
+            }
+        }
 
         if ($finalMethods === []) {
             throw new \InvalidArgumentException('map(): at least one HTTP method is required.');
@@ -670,20 +678,24 @@ final class RouterFactory
                 $this->callRouteMethod($route, 'middleware', $this->resolveMiddleware($middleware));
             }
 
-            if ($throttle !== null) {
+            if ($index === 0 && $throttle !== null) {
                 $this->assertValidThrottle($throttle->limit, $throttle->perSeconds, $context);
 
                 if ($this->cache === null) {
                     throw new \RuntimeException('Throttle support requires a CacheInterface.');
                 }
 
-                $this->callRouteMethod($route, 'middleware', new ThrottleMiddleware(
+                $throttleMiddleware = new ThrottleMiddleware(
                     $this->cache,
                     $throttle->limit,
                     $throttle->perSeconds,
                     $throttle->key,
                     $this->logger,
-                ));
+                );
+            }
+
+            if (isset($throttleMiddleware)) {
+                $this->callRouteMethod($route, 'middleware', $throttleMiddleware);
             }
         }
     }

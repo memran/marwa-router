@@ -150,10 +150,15 @@ final class CorsMiddleware implements MiddlewareInterface
             return [];
         }
 
-        return array_values(array_filter(array_map(
-            static fn (string $value): string => trim($value),
-            explode(',', $headerValue),
-        ), static fn (string $value): bool => $value !== ''));
+        $headers = [];
+        foreach (explode(',', $headerValue) as $value) {
+            $value = trim($value);
+            if ($value !== '') {
+                $headers[] = $value;
+            }
+        }
+
+        return $headers;
     }
 
     /**

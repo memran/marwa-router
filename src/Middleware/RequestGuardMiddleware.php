@@ -18,20 +18,25 @@ final class RequestGuardMiddleware implements MiddlewareInterface
     private const CTL_PATTERN = '/[\x00-\x08\x0B-\x1F\x7F]/';
     private const HOST_PATTERN = '/^([a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?\.)*[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?(\:\d{1,5})?$/';
 
+    /** @var array<string, true> */
+    private array $allowedMethodsSet;
+
     /** @param string[] $allowedMethods */
     public function __construct(
         private readonly array $allowedMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
         private readonly int $maxContentLength = 2_000_000, // 2 MB
         private readonly bool $rejectAmbiguousHosts = true,
         private readonly bool $rejectControlChars = true,
-    ) {}
+    ) {
+        $this->allowedMethodsSet = array_fill_keys(array_map('strtoupper', $this->allowedMethods), true);
+    }
 
     #[\Override]
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         // Method allowlist
         $method = strtoupper($request->getMethod());
-        if (!in_array($method, $this->allowedMethods, true)) {
+        if (!isset($this->allowedMethodsSet[$method])) {
             return new JsonResponse(['message' => 'Method Not Allowed'], 405);
         }
 
@@ -79,15 +84,19 @@ final class RequestGuardMiddleware implements MiddlewareInterface
 
     private function normalizePath(string $p): string
     {
-        $parts = array_values(array_filter(explode('/', $p), fn ($x) => $x !== '' && $x !== '.'));
+        $segments = explode('/', $p);
         $stack = [];
-        foreach ($parts as $seg) {
+        foreach ($segments as $seg) {
+            if ($seg === '' || $seg === '.') {
+                continue;
+            }
             if ($seg === '..') {
                 array_pop($stack);
                 continue;
             }
             $stack[] = $seg;
         }
-        return '/' . implode('/', $stack);
+
+        return $stack === [] ? '/' : '/' . implode('/', $stack);
     }
 }
