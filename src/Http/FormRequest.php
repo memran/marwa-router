@@ -13,6 +13,10 @@ abstract class FormRequest
     private ?ValidatorInterface $validator;
     /** @var array<string, mixed>|null */
     private ?array $validated = null;
+    private ?HttpRequest $httpInstance = null;
+    private ?InputBag $queryBag = null;
+    private ?InputBag $bodyBag = null;
+    private ?InputBag $cookieBag = null;
 
     public function __construct(ServerRequestInterface $request, ?ValidatorInterface $validator = null)
     {
@@ -25,7 +29,7 @@ abstract class FormRequest
      */
     public function http(): HttpRequest
     {
-        return new HttpRequest($this->request);
+        return $this->httpInstance ??= new HttpRequest($this->request);
     }
 
     /**
@@ -44,20 +48,23 @@ abstract class FormRequest
 
     public function query(): InputBag
     {
-        return new InputBag($this->request->getQueryParams());
+        return $this->queryBag ??= new InputBag($this->request->getQueryParams());
     }
 
     public function body(): InputBag
     {
-        $parsed = $this->request->getParsedBody();
-        /** @var array<string, mixed> $safe */
-        $safe = is_array($parsed) ? $parsed : [];
-        return new InputBag($safe);
+        if ($this->bodyBag === null) {
+            $parsed = $this->request->getParsedBody();
+            /** @var array<string, mixed> $safe */
+            $safe = is_array($parsed) ? $parsed : [];
+            $this->bodyBag = new InputBag($safe);
+        }
+        return $this->bodyBag;
     }
 
     public function cookies(): InputBag
     {
-        return new InputBag($this->request->getCookieParams());
+        return $this->cookieBag ??= new InputBag($this->request->getCookieParams());
     }
 
     /**
@@ -72,11 +79,16 @@ abstract class FormRequest
         }
 
         if ($this->validator === null) {
-            // Fallback: just merge query + body.
-            $this->validated = array_merge(
+            // Fallback: merge query + body, filtered by rules() keys to prevent mass assignment.
+            $all = array_merge(
                 $this->request->getQueryParams(),
                 is_array($this->request->getParsedBody()) ? $this->request->getParsedBody() : [],
             );
+            $rules = $this->rules();
+            if ($rules !== []) {
+                $all = array_intersect_key($all, array_flip(array_keys($rules)));
+            }
+            $this->validated = $all;
             return $this->validated;
         }
 

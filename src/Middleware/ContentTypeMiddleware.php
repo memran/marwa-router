@@ -16,11 +16,12 @@ use Psr\Http\Server\RequestHandlerInterface;
 final class ContentTypeMiddleware implements MiddlewareInterface
 {
     public function __construct(
-        private bool $requireJsonForWrites = true,
-        private int $maxJsonBytes = 1_000_000,
-        private int $maxJsonDepth = 32,
+        private readonly bool $requireJsonForWrites = true,
+        private readonly int $maxJsonBytes = 1_000_000,
+        private readonly int $maxJsonDepth = 32,
     ) {}
 
+    #[\Override]
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         $method = strtoupper($request->getMethod());

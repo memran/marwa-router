@@ -9,16 +9,10 @@ namespace Marwa\Router\Http;
  */
 final class InputBag
 {
-    /** @var array<string, mixed> */
-    private array $data;
-
-    /**
-     * @param array<string, mixed> $data
-     */
-    public function __construct(array $data)
-    {
-        $this->data = $data;
-    }
+    /** @param array<string, mixed> $data */
+    public function __construct(
+        private readonly array $data,
+    ) {}
 
     public function has(string $key): bool
     {

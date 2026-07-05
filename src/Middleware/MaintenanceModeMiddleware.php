@@ -25,13 +25,14 @@ final class MaintenanceModeMiddleware implements MiddlewareInterface
     public function __construct(
         bool|callable $enabled = true,
         array $except = [],
-        private ?int $retryAfter = null,
-        private string $message = 'Service temporarily unavailable',
+        private readonly ?int $retryAfter = null,
+        private readonly string $message = 'Service temporarily unavailable',
     ) {
         $this->enabled = $enabled;
         $this->except = $except;
     }
 
+    #[\Override]
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         if (!$this->isEnabled($request) || $this->isExcepted($request)) {

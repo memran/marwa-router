@@ -20,9 +20,9 @@ final class AuthTokenMiddleware implements MiddlewareInterface
      */
     public function __construct(
         array $tokens,
-        private string $attributeName = 'auth_token',
-        private string $identityAttributeName = 'auth_token_identity',
-        private string $realm = 'Bearer',
+        private readonly string $attributeName = 'auth_token',
+        private readonly string $identityAttributeName = 'auth_token_identity',
+        private readonly string $realm = 'Bearer',
     ) {
         foreach ($tokens as $key => $value) {
             if (is_int($key)) {
@@ -34,15 +34,22 @@ final class AuthTokenMiddleware implements MiddlewareInterface
         }
     }
 
+    #[\Override]
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         $token = $this->extractToken($request);
-        if ($token === null || !array_key_exists($token, $this->tokens)) {
+        if ($token === null) {
             return (new JsonResponse(['message' => 'Unauthorized'], 401))
                 ->withHeader('WWW-Authenticate', $this->realm);
         }
 
-        $identity = $this->tokens[$token];
+        $matchedToken = $this->findToken($token);
+        if ($matchedToken === null) {
+            return (new JsonResponse(['message' => 'Unauthorized'], 401))
+                ->withHeader('WWW-Authenticate', $this->realm);
+        }
+
+        $identity = $this->tokens[$matchedToken];
         $request = $request->withAttribute($this->attributeName, $token);
 
         if ($identity !== null) {
@@ -50,6 +57,22 @@ final class AuthTokenMiddleware implements MiddlewareInterface
         }
 
         return $handler->handle($request);
+    }
+
+    /**
+     * Constant-time token lookup to prevent timing attacks.
+     *
+     * @return string|null the matched token key, or null if not found
+     */
+    private function findToken(string $token): ?string
+    {
+        foreach ($this->tokens as $validToken => $identity) {
+            if (hash_equals($validToken, $token)) {
+                return $validToken;
+            }
+        }
+
+        return null;
     }
 
     private function extractToken(ServerRequestInterface $request): ?string
@@ -64,9 +87,6 @@ final class AuthTokenMiddleware implements MiddlewareInterface
             return $apiKey;
         }
 
-        $queryParams = $request->getQueryParams();
-        $queryToken = $queryParams['api_token'] ?? null;
-
-        return is_string($queryToken) && $queryToken !== '' ? $queryToken : null;
+        return null;
     }
 }

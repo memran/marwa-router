@@ -25,12 +25,13 @@ final class ExceptionToResponseMiddleware implements MiddlewareInterface
             \InvalidArgumentException::class => 400,
             \DomainException::class => 422,
         ],
-        private bool $exposeMessages = false,
-        private ?LoggerInterface $logger = null,
+        private readonly bool $exposeMessages = false,
+        private readonly ?LoggerInterface $logger = null,
     ) {
         $this->statusMap = $statusMap;
     }
 
+    #[\Override]
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         try {

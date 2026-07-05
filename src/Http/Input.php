@@ -149,7 +149,12 @@ final class Input
      */
     public static function has(string $key): bool
     {
-        return self::hasKey(self::all(), $key);
+        $data = self::all();
+        if (!self::hasKey($data, $key)) {
+            return false;
+        }
+        $value = self::dotGet($data, $key);
+        return $value !== '' && $value !== null && $value !== [];
     }
 
     /**
@@ -214,5 +219,25 @@ final class Input
         }
 
         return true;
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     */
+    private static function dotGet(array $data, string $key): mixed
+    {
+        if (array_key_exists($key, $data)) {
+            return $data[$key];
+        }
+
+        $current = $data;
+        foreach (explode('.', $key) as $segment) {
+            if (!is_array($current) || !array_key_exists($segment, $current)) {
+                return null;
+            }
+            $current = $current[$segment];
+        }
+
+        return $current;
     }
 }

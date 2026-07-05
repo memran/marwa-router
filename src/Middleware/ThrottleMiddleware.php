@@ -19,13 +19,14 @@ use Psr\SimpleCache\CacheInterface;
 final class ThrottleMiddleware implements MiddlewareInterface
 {
     public function __construct(
-        private CacheInterface $cache,
-        private int $limit,
-        private int $perSeconds = 60,
-        private string $key = 'ip', // 'ip' or header name (e.g. 'X-API-Key')
-        private ?LoggerInterface $logger = null,
+        private readonly CacheInterface $cache,
+        private readonly int $limit,
+        private readonly int $perSeconds = 60,
+        private readonly string $key = 'ip', // 'ip' or header name (e.g. 'X-API-Key')
+        private readonly ?LoggerInterface $logger = null,
     ) {}
 
+    #[\Override]
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         $bucketKey = $this->bucketKey($request);

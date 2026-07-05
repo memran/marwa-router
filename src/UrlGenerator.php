@@ -6,48 +6,55 @@ namespace Marwa\Router;
 
 final class UrlGenerator
 {
+    /** @var array<string, array{path:string,name:?string}> name => route */
+    private array $nameIndex = [];
+
     /** @param array<int, array{path:string,name:?string}> $routes */
-    public function __construct(private array $routes) {}
+    public function __construct(array $routes)
+    {
+        foreach ($routes as $route) {
+            if ($route['name'] !== null) {
+                $this->nameIndex[$route['name']] = $route;
+            }
+        }
+    }
 
     /**
      * @param array<string, scalar|null> $params
      */
     public function for(string $name, array $params = []): string
     {
-        foreach ($this->routes as $route) {
-            if ($route['name'] !== $name) {
-                continue;
-            }
-
-            $path = $route['path'] ?: '/';
-            $url = preg_replace_callback(
-                '/\{([a-zA-Z_][a-zA-Z0-9_]*)(?::[^}]+)?\}/',
-                static function (array $match) use (&$params): string {
-                    $key = $match[1];
-                    if (!array_key_exists($key, $params)) {
-                        throw new \InvalidArgumentException("Missing route param: {$key}");
-                    }
-
-                    $value = (string) $params[$key];
-                    unset($params[$key]);
-
-                    return rawurlencode($value);
-                },
-                $path,
-            );
-
-            if ($url === null) {
-                throw new \RuntimeException('Failed to compile route URL.');
-            }
-
-            if (!empty($params)) {
-                $url .= (str_contains($url, '?') ? '&' : '?') . http_build_query($params, '', '&', PHP_QUERY_RFC3986);
-            }
-
-            return $url;
+        if (!isset($this->nameIndex[$name])) {
+            throw new \RuntimeException("Route not found by name: {$name}");
         }
 
-        throw new \RuntimeException("Route not found by name: {$name}");
+        $route = $this->nameIndex[$name];
+        $path = $route['path'] ?: '/';
+        $url = preg_replace_callback(
+            '/\{([a-zA-Z_][a-zA-Z0-9_]*)(?::[^}]+)?\}/',
+            static function (array $match) use (&$params): string {
+                $key = $match[1];
+                if (!array_key_exists($key, $params)) {
+                    throw new \InvalidArgumentException("Missing route param: {$key}");
+                }
+
+                $value = (string) $params[$key];
+                unset($params[$key]);
+
+                return rawurlencode($value);
+            },
+            $path,
+        );
+
+        if ($url === null) {
+            throw new \RuntimeException('Failed to compile route URL.');
+        }
+
+        if (!empty($params)) {
+            $url .= (str_contains($url, '?') ? '&' : '?') . http_build_query($params, '', '&', PHP_QUERY_RFC3986);
+        }
+
+        return $url;
     }
 
     /**

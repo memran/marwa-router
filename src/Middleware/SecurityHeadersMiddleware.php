@@ -15,9 +15,10 @@ use Psr\Http\Server\RequestHandlerInterface;
 final class SecurityHeadersMiddleware implements MiddlewareInterface
 {
     public function __construct(
-        private string $csp = "default-src 'self'; frame-ancestors 'none'; base-uri 'self'",
+        private readonly string $csp = "default-src 'self'; frame-ancestors 'none'; base-uri 'self'",
     ) {}
 
+    #[\Override]
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         $res = $handler->handle($request);

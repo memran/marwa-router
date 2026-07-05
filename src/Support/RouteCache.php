@@ -44,6 +44,10 @@ use Marwa\Router\RouterFactory;
  */
 final class RouteCache
 {
+    public function __construct(
+        private readonly ?string $signingKey = null,
+    ) {}
+
     /**
      * @param array<int, RouteRegistryEntry> $routes
      */
@@ -52,8 +56,12 @@ final class RouteCache
         $this->ensureDirectory(dirname($file), 'route cache');
 
         $payload = "<?php\n\ndeclare(strict_types=1);\n\nreturn " . var_export($routes, true) . ";\n";
+        if ($this->signingKey !== null) {
+            $signature = hash_hmac('sha256', $payload, $this->signingKey);
+            $payload = "<?php\n\ndeclare(strict_types=1);\n\n/* SIG:{$signature} */\n\nreturn " . var_export($routes, true) . ";\n";
+        }
         if (file_put_contents($file, $payload, LOCK_EX) === false) {
-            throw new \RuntimeException(sprintf('Unable to write route cache file: %s', $file));
+            throw new \RuntimeException('Unable to write route cache file');
         }
     }
 
@@ -66,9 +74,26 @@ final class RouteCache
             throw new FileNotFoundException($file);
         }
 
-        $routes = require $file;
+        if ($this->signingKey !== null) {
+            $raw = file_get_contents($file);
+            if ($raw === false) {
+                throw new \RuntimeException('Unable to read route cache file');
+            }
+            if (!preg_match('#/\* SIG:([a-f0-9]{64}) \*/#', $raw, $sigMatch)) {
+                throw new \RuntimeException('Route cache file is missing HMAC signature');
+            }
+            $storedSig = $sigMatch[1];
+            $contentWithoutSig = preg_replace('#/\* SIG:[a-f0-9]{64} \*/\n*\n*#', '', $raw, 1) ?? $raw;
+            if (!hash_equals($storedSig, hash_hmac('sha256', $contentWithoutSig, $this->signingKey))) {
+                throw new \RuntimeException('Route cache file HMAC verification failed');
+            }
+            $routes = eval('?' . '>' . $contentWithoutSig);
+        } else {
+            $routes = require $file;
+        }
+
         if (!is_array($routes)) {
-            throw new \UnexpectedValueException(sprintf('Route cache file must return an array: %s', $file));
+            throw new \UnexpectedValueException('Route cache file must return an array');
         }
 
         return $routes;
@@ -110,8 +135,12 @@ return static function (\Marwa\Router\RouterFactory \$router): void {
 PHP;
 
         $rendered = sprintf($payload, var_export($compiled, true));
+        if ($this->signingKey !== null) {
+            $signature = hash_hmac('sha256', $rendered, $this->signingKey);
+            $rendered = "/* SIG:{$signature} */\n" . $rendered;
+        }
         if (file_put_contents($file, $rendered, LOCK_EX) === false) {
-            throw new \RuntimeException(sprintf('Unable to write compiled route cache file: %s', $file));
+            throw new \RuntimeException('Unable to write compiled route cache file');
         }
     }
 
@@ -121,12 +150,26 @@ PHP;
             throw new FileNotFoundException($file);
         }
 
-        $loader = require $file;
+        if ($this->signingKey !== null) {
+            $raw = file_get_contents($file);
+            if ($raw === false) {
+                throw new \RuntimeException('Unable to read compiled route cache file');
+            }
+            if (!preg_match('#^/\* SIG:([a-f0-9]{64}) \*/\n#', $raw, $sigMatch)) {
+                throw new \RuntimeException('Compiled route cache file is missing HMAC signature');
+            }
+            $storedSig = $sigMatch[1];
+            $contentWithoutSig = substr($raw, strlen($sigMatch[0]));
+            if (!hash_equals($storedSig, hash_hmac('sha256', $contentWithoutSig, $this->signingKey))) {
+                throw new \RuntimeException('Compiled route cache file HMAC verification failed');
+            }
+            $loader = eval('?' . '>' . $contentWithoutSig);
+        } else {
+            $loader = require $file;
+        }
+
         if (!is_callable($loader)) {
-            throw new \UnexpectedValueException(sprintf(
-                'Compiled route cache file must return a callable: %s',
-                $file,
-            ));
+            throw new \UnexpectedValueException('Compiled route cache file must return a callable');
         }
 
         $loader($router);

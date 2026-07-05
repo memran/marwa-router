@@ -15,14 +15,18 @@ use Psr\Http\Server\RequestHandlerInterface;
  */
 final class RequestGuardMiddleware implements MiddlewareInterface
 {
+    private const CTL_PATTERN = '/[\x00-\x08\x0B-\x1F\x7F]/';
+    private const HOST_PATTERN = '/^([a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?\.)*[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?(\:\d{1,5})?$/';
+
     /** @param string[] $allowedMethods */
     public function __construct(
-        private array $allowedMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-        private int $maxContentLength = 2_000_000, // 2 MB
-        private bool $rejectAmbiguousHosts = true,
-        private bool $rejectControlChars = true,
+        private readonly array $allowedMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+        private readonly int $maxContentLength = 2_000_000, // 2 MB
+        private readonly bool $rejectAmbiguousHosts = true,
+        private readonly bool $rejectControlChars = true,
     ) {}
 
+    #[\Override]
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         // Method allowlist
@@ -34,7 +38,7 @@ final class RequestGuardMiddleware implements MiddlewareInterface
         // Host header sanity (avoid header attacks / SSRF to internal hostnames via proxies)
         if ($this->rejectAmbiguousHosts) {
             $host = $request->getHeaderLine('Host');
-            if (!$host || !preg_match('/^[A-Za-z0-9\.\-:]+$/', $host)) {
+            if (!$host || !preg_match(self::HOST_PATTERN, $host)) {
                 return new JsonResponse(['message' => 'Bad Host header'], 400);
             }
         }
@@ -70,7 +74,7 @@ final class RequestGuardMiddleware implements MiddlewareInterface
 
     private function hasCtl(string $s): bool
     {
-        return (bool)preg_match('/[\x00-\x08\x0B-\x1F\x7F]/', $s);
+        return (bool)preg_match(self::CTL_PATTERN, $s);
     }
 
     private function normalizePath(string $p): string

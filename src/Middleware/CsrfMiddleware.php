@@ -16,15 +16,16 @@ final class CsrfMiddleware implements MiddlewareInterface
      * @param list<string> $safeMethods
      */
     public function __construct(
-        private string $cookieName = 'csrf_token',
-        private string $attributeName = 'csrf_token',
-        private string $headerName = 'X-CSRF-Token',
-        private string $bodyField = '_csrf',
-        private array $safeMethods = ['GET', 'HEAD', 'OPTIONS'],
-        private bool $secureCookie = false,
-        private string $sameSite = 'Lax',
+        private readonly string $cookieName = 'csrf_token',
+        private readonly string $attributeName = 'csrf_token',
+        private readonly string $headerName = 'X-CSRF-Token',
+        private readonly string $bodyField = '_csrf',
+        private readonly array $safeMethods = ['GET', 'HEAD', 'OPTIONS'],
+        private readonly bool $secureCookie = false,
+        private readonly string $sameSite = 'Lax',
     ) {}
 
+    #[\Override]
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         $cookieToken = $this->readCookieToken($request);
@@ -36,7 +37,7 @@ final class CsrfMiddleware implements MiddlewareInterface
             $response = $handler->handle($request);
 
             if ($cookieToken === '') {
-                $response = $response->withAddedHeader('Set-Cookie', $this->buildCookieHeader($token));
+                $response = $response->withAddedHeader('Set-Cookie', $this->buildCookieHeader($token, $request));
             }
 
             return $response;
@@ -87,7 +88,7 @@ final class CsrfMiddleware implements MiddlewareInterface
         return '';
     }
 
-    private function buildCookieHeader(string $token): string
+    private function buildCookieHeader(string $token, ServerRequestInterface $request): string
     {
         $parts = [
             rawurlencode($this->cookieName) . '=' . rawurlencode($token),
@@ -96,10 +97,24 @@ final class CsrfMiddleware implements MiddlewareInterface
             'SameSite=' . $this->sameSite,
         ];
 
-        if ($this->secureCookie) {
+        $isSecure = $this->secureCookie || $this->isSecureRequest($request);
+        if ($isSecure) {
             $parts[] = 'Secure';
         }
 
         return implode('; ', $parts);
+    }
+
+    private function isSecureRequest(ServerRequestInterface $request): bool
+    {
+        $uri = $request->getUri();
+        if ($uri->getScheme() === 'https') {
+            return true;
+        }
+        $forwardedProto = $request->getHeaderLine('X-Forwarded-Proto');
+        if ($forwardedProto !== '' && strtolower($forwardedProto) === 'https') {
+            return true;
+        }
+        return false;
     }
 }

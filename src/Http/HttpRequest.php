@@ -16,6 +16,8 @@ use Psr\Http\Message\ServerRequestInterface;
 final class HttpRequest
 {
     private ServerRequestInterface $request;
+    /** @var array<string,mixed>|null */
+    private ?array $allCache = null;
 
     public function __construct(ServerRequestInterface $request)
     {
@@ -37,8 +39,11 @@ final class HttpRequest
      */
     public function all(): array
     {
-        $body = $this->bodyArray();
-        return array_merge($this->request->getQueryParams(), $body);
+        if ($this->allCache === null) {
+            $body = $this->bodyArray();
+            $this->allCache = array_merge($this->request->getQueryParams(), $body);
+        }
+        return $this->allCache;
     }
 
     /**

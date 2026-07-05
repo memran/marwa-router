@@ -12,13 +12,15 @@ use Psr\Http\Message\UploadedFileInterface;
  */
 final class UploadedFiles
 {
+    private static ?UploadedFileFactory $factory = null;
+
     /**
      * @param array<string, mixed> $files
      * @return array<string, mixed>
      */
     public static function normalize(array $files): array
     {
-        $factory = new UploadedFileFactory();
+        $factory = self::$factory ??= new UploadedFileFactory();
         $normalized = [];
 
         foreach ($files as $field => $spec) {
@@ -92,9 +94,16 @@ final class UploadedFiles
 
     private static function streamFromPath(string $path): \Psr\Http\Message\StreamInterface
     {
-        $stream = fopen($path, 'rb');
+        // Validate path is within the system temp directory
+        $realPath = realpath($path);
+        $tempDir = sys_get_temp_dir();
+        if ($realPath === false || !str_starts_with($realPath, rtrim($tempDir, '/\\'))) {
+            throw new \RuntimeException('Uploaded file path is outside the temp directory');
+        }
+
+        $stream = fopen($realPath, 'rb');
         if ($stream === false) {
-            throw new \RuntimeException('Failed to open uploaded file stream: ' . $path);
+            throw new \RuntimeException('Failed to open uploaded file stream');
         }
         return new \Laminas\Diactoros\Stream($stream);
     }

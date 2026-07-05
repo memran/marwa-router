@@ -11,17 +11,18 @@ use Psr\Http\Server\RequestHandlerInterface;
 
 final class RequestIdMiddleware implements MiddlewareInterface
 {
-    /** @var null|callable():string */
-    private $generator;
+    /** @var \Closure():string|null */
+    private readonly ?\Closure $generator;
 
     public function __construct(
-        private string $headerName = 'X-Request-Id',
-        private string $attributeName = 'request_id',
+        private readonly string $headerName = 'X-Request-Id',
+        private readonly string $attributeName = 'request_id',
         ?callable $generator = null,
     ) {
-        $this->generator = $generator;
+        $this->generator = $generator !== null ? \Closure::fromCallable($generator) : null;
     }
 
+    #[\Override]
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         $requestId = trim($request->getHeaderLine($this->headerName));

@@ -13,6 +13,11 @@ use Psr\Http\Server\RequestHandlerInterface;
 
 final class CorsMiddleware implements MiddlewareInterface
 {
+    /** @var list<string> */
+    private array $normalizedMethods;
+    /** @var list<string> */
+    private array $normalizedHeaders;
+
     /**
      * @param list<string> $allowedOrigins
      * @param list<string> $allowedMethods
@@ -20,14 +25,18 @@ final class CorsMiddleware implements MiddlewareInterface
      * @param list<string> $exposedHeaders
      */
     public function __construct(
-        private array $allowedOrigins = ['*'],
-        private array $allowedMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-        private array $allowedHeaders = ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Request-Id'],
-        private array $exposedHeaders = [],
-        private bool $allowCredentials = false,
-        private ?int $maxAge = null,
-    ) {}
+        private readonly array $allowedOrigins = ['*'],
+        private readonly array $allowedMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+        private readonly array $allowedHeaders = ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Request-Id'],
+        private readonly array $exposedHeaders = [],
+        private readonly bool $allowCredentials = false,
+        private readonly ?int $maxAge = null,
+    ) {
+        $this->normalizedMethods = $this->normalizeTokens($this->allowedMethods);
+        $this->normalizedHeaders = $this->normalizeTokens($this->allowedHeaders);
+    }
 
+    #[\Override]
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         $origin = $request->getHeaderLine('Origin');
@@ -44,7 +53,7 @@ final class CorsMiddleware implements MiddlewareInterface
 
         if ($this->isPreflight($request)) {
             $requestedMethod = strtolower(trim($request->getHeaderLine('Access-Control-Request-Method')));
-            if ($requestedMethod === '' || !in_array($requestedMethod, $this->normalizeTokens($this->allowedMethods), true)) {
+            if ($requestedMethod === '' || !in_array($requestedMethod, $this->normalizedMethods, true)) {
                 return new JsonResponse(['message' => 'CORS method denied'], 403);
             }
 
@@ -73,7 +82,7 @@ final class CorsMiddleware implements MiddlewareInterface
             $response = $response->withHeader('Vary', 'Origin');
         }
 
-        if ($this->allowCredentials) {
+        if ($this->allowCredentials && $this->allowedOrigins !== ['*']) {
             $response = $response->withHeader('Access-Control-Allow-Credentials', 'true');
         }
 
@@ -122,7 +131,7 @@ final class CorsMiddleware implements MiddlewareInterface
             return true;
         }
 
-        $allowed = $this->normalizeTokens($this->allowedHeaders);
+        $allowed = $this->normalizedHeaders;
         foreach ($requestedHeaders as $header) {
             if (!in_array(strtolower($header), $allowed, true)) {
                 return false;

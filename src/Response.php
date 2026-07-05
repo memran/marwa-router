@@ -253,7 +253,7 @@ final class Response
         string $path = '',
         string $domain = '',
         bool $secure = false,
-        bool $httponly = false,
+        bool $httponly = true,
         string $samesite = '',
     ): self {
         if ($samesite !== '') {
@@ -262,6 +262,11 @@ final class Response
                 throw new \InvalidArgumentException('Invalid SameSite value. Expected lax, strict, none, or an empty string.');
             }
             $samesite = ucfirst($normalizedSameSite);
+        }
+
+        // Auto-detect HTTPS when secure flag not explicitly set
+        if (!$secure) {
+            $secure = self::isSecureRequest();
         }
 
         $cookieString = sprintf(
@@ -337,7 +342,8 @@ final class Response
      */
     public function __toString(): string
     {
-        $output = sprintf(
+        $parts = [];
+        $parts[] = sprintf(
             "HTTP/%s %d %s\r\n",
             $this->response->getProtocolVersion(),
             $this->response->getStatusCode(),
@@ -346,7 +352,7 @@ final class Response
 
         foreach ($this->response->getHeaders() as $name => $values) {
             foreach ($values as $value) {
-                $output .= sprintf("%s: %s\r\n", $name, $value);
+                $parts[] = sprintf("%s: %s\r\n", $name, $value);
             }
         }
 
@@ -355,10 +361,10 @@ final class Response
             $body->rewind();
         }
 
-        $output .= "\r\n";
-        $output .= $body->getContents();
+        $parts[] = "\r\n";
+        $parts[] = $body->getContents();
 
-        return $output;
+        return implode('', $parts);
     }
 
     /**
@@ -387,9 +393,27 @@ final class Response
 
     private static function sanitizeDownloadFilename(string $filename): string
     {
-        $sanitized = preg_replace('/[\r\n"]+/', '', $filename) ?? 'download';
-        $sanitized = trim($sanitized);
+        // Strip null bytes, control characters, path separators, and quotes
+        $sanitized = preg_replace('/[\x00-\x1f\x7f\/\\\\"]+/', '', $filename) ?? '';
+        // Use basename as additional safety layer against path traversal
+        $sanitized = basename($sanitized);
+        // Trim and limit length
+        $sanitized = substr(trim($sanitized), 0, 255);
 
         return $sanitized !== '' ? $sanitized : 'download';
+    }
+
+    private static function isSecureRequest(): bool
+    {
+        if (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
+            return true;
+        }
+        if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && strtolower($_SERVER['HTTP_X_FORWARDED_PROTO']) === 'https') {
+            return true;
+        }
+        if (isset($_SERVER['SERVER_PORT']) && (int) $_SERVER['SERVER_PORT'] === 443) {
+            return true;
+        }
+        return false;
     }
 }

@@ -34,12 +34,18 @@ final class ClassLocator
             $it  = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir));
             $rit = new RegexIterator($it, '/^.+\.php$/i', RegexIterator::GET_MATCH);
 
+            $normalizedDir = rtrim($dir, '/\\') . '/';
             foreach ($rit as $match) {
                 $file = $match[0];
                 // Skip non-regular files (symlinks etc. are fine)
                 if (is_file($file)) {
+                    // Validate the file is within the expected directory (prevents symlink traversal)
+                    $realFile = realpath($file);
+                    if ($realFile !== false && !str_starts_with($realFile, $normalizedDir)) {
+                        continue;
+                    }
                     require_once $file;
-                    $loaded[] = realpath($file) ?: $file;
+                    $loaded[] = $realFile ?: $file;
                     //continue;
                 }
             }
