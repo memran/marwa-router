@@ -87,7 +87,8 @@ final class RouteCache
             if (!hash_equals($storedSig, hash_hmac('sha256', $contentWithoutSig, $this->signingKey))) {
                 throw new \RuntimeException('Route cache file HMAC verification failed');
             }
-            $routes = eval('?' . '>' . $contentWithoutSig);
+            $code = preg_replace('/^<\?php\s*/', '', $contentWithoutSig);
+            $routes = eval($code);
         } else {
             $routes = require $file;
         }
@@ -163,7 +164,8 @@ PHP;
             if (!hash_equals($storedSig, hash_hmac('sha256', $contentWithoutSig, $this->signingKey))) {
                 throw new \RuntimeException('Compiled route cache file HMAC verification failed');
             }
-            $loader = eval('?' . '>' . $contentWithoutSig);
+            $code = preg_replace('/^<\?php\s*/', '', $contentWithoutSig);
+            $loader = eval($code);
         } else {
             $loader = require $file;
         }
