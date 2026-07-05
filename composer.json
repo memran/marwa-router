@@ -29,6 +29,7 @@
   },
   "require-dev": {
     "friendsofphp/php-cs-fixer": "^3",
+    "phpbench/phpbench": "^1.7",
     "phpstan/phpstan": "^2",
     "phpunit/phpunit": "^10 || ^11"
   },
@@ -40,6 +41,7 @@
   "autoload-dev": {
     "psr-4": {
       "Marwa\\Router\\Tests\\": "tests/",
+      "Marwa\\Router\\Benchmarks\\": "benchmarks/",
       "Examples\\": "examples/"
     }
   },
@@ -61,7 +63,8 @@
       "@analyse",
       "@test",
       "@lint"
-    ]
+    ],
+    "benchmark": "phpbench run --report=default --output=ansi"
   },
   "config": {
     "sort-packages": true,
