@@ -14,6 +14,7 @@ use Laminas\Diactoros\Response\TextResponse;
 use Laminas\Diactoros\Stream;
 use Marwa\Router\Exceptions\FileNotFoundException;
 use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\ServerRequestInterface;
 
 final class Response
 {
@@ -45,7 +46,7 @@ final class Response
      */
     public static function html(string $html, int $status = 200, array $headers = []): ResponseInterface
     {
-        return  new HtmlResponse($html, $status, $headers);
+        return new HtmlResponse($html, $status, $headers);
     }
 
     /**
@@ -55,7 +56,7 @@ final class Response
      */
     public static function text(string $text, int $status = 200, array $headers = []): ResponseInterface
     {
-        return  new TextResponse($text, $status, $headers);
+        return new TextResponse($text, $status, $headers);
 
     }
 
@@ -66,7 +67,7 @@ final class Response
      */
     public static function empty(int $status = 204, array $headers = []): ResponseInterface
     {
-        return  new EmptyResponse($status, $headers);
+        return new EmptyResponse($status, $headers);
     }
 
     /**
@@ -76,7 +77,7 @@ final class Response
      */
     public static function redirect(string $uri, int $status = 302, array $headers = []): ResponseInterface
     {
-        return  new RedirectResponse($uri, $status, $headers);
+        return new RedirectResponse($uri, $status, $headers);
     }
 
     /**
@@ -255,6 +256,7 @@ final class Response
         bool $secure = false,
         bool $httponly = true,
         string $samesite = '',
+        ?ServerRequestInterface $request = null,
     ): self {
         if ($samesite !== '') {
             $normalizedSameSite = strtolower($samesite);
@@ -266,7 +268,7 @@ final class Response
 
         // Auto-detect HTTPS when secure flag not explicitly set
         if (!$secure) {
-            $secure = self::isSecureRequest();
+            $secure = self::isSecureRequest($request);
         }
 
         $cookieString = sprintf(
@@ -403,8 +405,27 @@ final class Response
         return $sanitized !== '' ? $sanitized : 'download';
     }
 
-    private static function isSecureRequest(): bool
+    private static function isSecureRequest(?ServerRequestInterface $request = null): bool
     {
+        if ($request !== null) {
+            $uri = $request->getUri();
+
+            if ($uri->getScheme() === 'https') {
+                return true;
+            }
+
+            $forwardedProto = $request->getHeaderLine('X-Forwarded-Proto');
+            if ($forwardedProto !== '' && strtolower($forwardedProto) === 'https') {
+                return true;
+            }
+
+            $serverPort = $request->getServerParams()['SERVER_PORT'] ?? null;
+            if ($serverPort !== null && (int) $serverPort === 443) {
+                return true;
+            }
+        }
+
+        // Fallback to superglobals when no request is injected
         if (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
             return true;
         }

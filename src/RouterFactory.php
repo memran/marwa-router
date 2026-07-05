@@ -646,7 +646,7 @@ final class RouterFactory
     /**
      * @param array<int, string> $methods
      * @param callable|class-string|array{0: object|class-string, 1: non-empty-string} $handler
-     * @return array<int, mixed>
+     * @return array<int, \League\Route\Route>
      */
     private function mapRoutes(LeagueRouter $target, array $methods, string $path, callable|array|string $handler): array
     {
@@ -670,6 +670,8 @@ final class RouterFactory
         ?ThrottleAttr $throttle,
         string $context,
     ): void {
+        $throttleMiddleware = null;
+
         foreach ($routes as $index => $route) {
             $this->callRouteMethodIfAvailable($route, 'setName', $name !== null && $name !== '' && $index === 0, $name);
             $this->callRouteMethodIfAvailable($route, 'setHost', $domain !== null && $domain !== '', $domain);
@@ -694,7 +696,7 @@ final class RouterFactory
                 );
             }
 
-            if (isset($throttleMiddleware)) {
+            if ($throttleMiddleware !== null) {
                 $this->callRouteMethod($route, 'middleware', $throttleMiddleware);
             }
         }

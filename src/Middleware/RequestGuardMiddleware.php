@@ -16,7 +16,7 @@ use Psr\Http\Server\RequestHandlerInterface;
 final class RequestGuardMiddleware implements MiddlewareInterface
 {
     private const CTL_PATTERN = '/[\x00-\x08\x0B-\x1F\x7F]/';
-    private const HOST_PATTERN = '/^([a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?\.)*[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?(\:\d{1,5})?$/';
+    private const HOST_PATTERN = '/^(([a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?\.)*[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?|\[[\da-fA-F:.]+\])(\:\d{1,5})?$/';
 
     /** @var array<string, true> */
     private array $allowedMethodsSet;

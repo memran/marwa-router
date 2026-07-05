@@ -57,7 +57,7 @@ final class SmartApplicationStrategy extends ApplicationStrategy
         return $count;
     }
 
-    private function cacheKey(mixed $controller): string
+    private function cacheKey(callable $controller): string
     {
         if (is_array($controller)) {
             $class = is_object($controller[0]) ? get_class($controller[0]) : $controller[0];
@@ -71,6 +71,8 @@ final class SmartApplicationStrategy extends ApplicationStrategy
             return get_class($controller);
         }
 
-        return (string) $controller;
+        assert(is_string($controller));
+
+        return $controller;
     }
 }

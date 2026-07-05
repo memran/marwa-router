@@ -30,7 +30,7 @@ final class ThrottleMiddleware implements MiddlewareInterface
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         $bucketKey = $this->bucketKey($request);
-        $ttl       = $this->perSeconds;
+        $ttl       = $this->ttlRemaining();
 
         $count = (int) ($this->cache->get($bucketKey, 0));
 
@@ -51,6 +51,13 @@ final class ThrottleMiddleware implements MiddlewareInterface
         $this->cache->set($bucketKey, $count + 1, $ttl);
 
         return $handler->handle($request);
+    }
+
+    private function ttlRemaining(): int
+    {
+        $now = time();
+
+        return (int) floor(($now + $this->perSeconds) / $this->perSeconds) * $this->perSeconds - $now;
     }
 
     private function bucketKey(ServerRequestInterface $req): string

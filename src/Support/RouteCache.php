@@ -87,8 +87,16 @@ final class RouteCache
             if (!hash_equals($storedSig, hash_hmac('sha256', $contentWithoutSig, $this->signingKey))) {
                 throw new \RuntimeException('Route cache file HMAC verification failed');
             }
-            $code = preg_replace('/^<\?php\s*/', '', $contentWithoutSig);
-            $routes = eval($code);
+            $tmpFile = tempnam(sys_get_temp_dir(), 'route_cache_');
+            if ($tmpFile === false) {
+                throw new \RuntimeException('Unable to create temporary file for route cache');
+            }
+            file_put_contents($tmpFile, $contentWithoutSig, LOCK_EX);
+            try {
+                $routes = require $tmpFile;
+            } finally {
+                @unlink($tmpFile);
+            }
         } else {
             $routes = require $file;
         }
@@ -164,8 +172,16 @@ PHP;
             if (!hash_equals($storedSig, hash_hmac('sha256', $contentWithoutSig, $this->signingKey))) {
                 throw new \RuntimeException('Compiled route cache file HMAC verification failed');
             }
-            $code = preg_replace('/^<\?php\s*/', '', $contentWithoutSig);
-            $loader = eval($code);
+            $tmpFile = tempnam(sys_get_temp_dir(), 'route_cache_');
+            if ($tmpFile === false) {
+                throw new \RuntimeException('Unable to create temporary file for route cache');
+            }
+            file_put_contents($tmpFile, $contentWithoutSig, LOCK_EX);
+            try {
+                $loader = require $tmpFile;
+            } finally {
+                @unlink($tmpFile);
+            }
         } else {
             $loader = require $file;
         }

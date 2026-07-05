@@ -46,7 +46,6 @@ final class ClassLocator
                     }
                     require_once $file;
                     $loaded[] = $realFile ?: $file;
-                    //continue;
                 }
             }
         }
