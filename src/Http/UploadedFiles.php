@@ -96,7 +96,7 @@ final class UploadedFiles
     {
         // Validate path is within the system temp directory
         $realPath = realpath($path);
-        $tempDir = sys_get_temp_dir();
+        $tempDir = realpath(sys_get_temp_dir()) ?: sys_get_temp_dir();
         if ($realPath === false || !str_starts_with($realPath, rtrim($tempDir, '/\\'))) {
             throw new \RuntimeException('Uploaded file path is outside the temp directory');
         }
