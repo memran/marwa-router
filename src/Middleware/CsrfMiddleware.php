@@ -23,6 +23,7 @@ final class CsrfMiddleware implements MiddlewareInterface
         private readonly array $safeMethods = ['GET', 'HEAD', 'OPTIONS'],
         private readonly bool $secureCookie = false,
         private readonly string $sameSite = 'Lax',
+        private readonly bool $httpOnly = true,
     ) {}
 
     #[\Override]
@@ -80,7 +81,7 @@ final class CsrfMiddleware implements MiddlewareInterface
 
         foreach (explode(';', $cookieHeader) as $segment) {
             $parts = explode('=', trim($segment), 2);
-            if ($parts[0] === $this->cookieName) {
+            if (trim($parts[0]) === $this->cookieName) {
                 return urldecode($parts[1] ?? '');
             }
         }
@@ -93,9 +94,12 @@ final class CsrfMiddleware implements MiddlewareInterface
         $parts = [
             rawurlencode($this->cookieName) . '=' . rawurlencode($token),
             'Path=/',
-            'HttpOnly',
             'SameSite=' . $this->sameSite,
         ];
+
+        if ($this->httpOnly) {
+            $parts[] = 'HttpOnly';
+        }
 
         $isSecure = $this->secureCookie || $this->isSecureRequest($request);
         if ($isSecure) {

@@ -22,11 +22,17 @@ final class RequestIdMiddleware implements MiddlewareInterface
         $this->generator = $generator !== null ? \Closure::fromCallable($generator) : null;
     }
 
+    /**
+     * Allowed shape for client-supplied request IDs (bounded length, safe
+     * characters) to prevent log forging and oversized header reflection.
+     */
+    private const ID_PATTERN = '/^[A-Za-z0-9._-]{1,128}$/';
+
     #[\Override]
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
         $requestId = trim($request->getHeaderLine($this->headerName));
-        if ($requestId === '') {
+        if ($requestId === '' || preg_match(self::ID_PATTERN, $requestId) !== 1) {
             $requestId = $this->generateRequestId();
         }
 

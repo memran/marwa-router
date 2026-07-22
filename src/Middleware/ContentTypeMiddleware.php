@@ -27,7 +27,11 @@ final class ContentTypeMiddleware implements MiddlewareInterface
         $method = strtoupper($request->getMethod());
         if ($this->requireJsonForWrites && in_array($method, ['POST', 'PUT', 'PATCH'], true)) {
             $ct = $request->getHeaderLine('Content-Type');
-            if ($ct === '' || stripos($ct, 'application/json') === false) {
+            $mediaType = strtolower(trim(explode(';', $ct, 2)[0]));
+            // Exact media-type match (vendor "+json" suffixes are JSON too).
+            // A substring match would accept bogus types such as
+            // "text/plain; x=application/json".
+            if ($mediaType !== 'application/json' && !str_ends_with($mediaType, '+json')) {
                 return new JsonResponse(['message' => 'Unsupported Media Type'], 415);
             }
 

@@ -94,10 +94,11 @@ final class UploadedFiles
 
     private static function streamFromPath(string $path): \Psr\Http\Message\StreamInterface
     {
-        // Validate path is within the system temp directory
+        // Validate path is within an allowed upload directory. Both the
+        // system temp dir and a configured upload_tmp_dir are legitimate
+        // locations for PHP uploads.
         $realPath = realpath($path);
-        $tempDir = realpath(sys_get_temp_dir()) ?: sys_get_temp_dir();
-        if ($realPath === false || !str_starts_with($realPath, rtrim($tempDir, '/\\'))) {
+        if ($realPath === false || !self::isWithinAllowedUploadDir($realPath)) {
             throw new \RuntimeException('Uploaded file path is outside the temp directory');
         }
 
@@ -106,5 +107,35 @@ final class UploadedFiles
             throw new \RuntimeException('Failed to open uploaded file stream');
         }
         return new \Laminas\Diactoros\Stream($stream);
+    }
+
+    private static function isWithinAllowedUploadDir(string $realPath): bool
+    {
+        $allowedDirs = [sys_get_temp_dir()];
+
+        $uploadTmpDir = ini_get('upload_tmp_dir');
+        if (is_string($uploadTmpDir) && trim($uploadTmpDir) !== '') {
+            $allowedDirs[] = trim($uploadTmpDir);
+        }
+
+        foreach ($allowedDirs as $dir) {
+            $realDir = realpath($dir);
+            if ($realDir === false) {
+                continue;
+            }
+
+            $prefix = rtrim($realDir, '/\\');
+            if ($prefix === '') {
+                continue;
+            }
+
+            // Require a directory boundary so "/tmp_evil/x" does not pass
+            // for an allowed dir of "/tmp".
+            if ($realPath === $prefix || str_starts_with($realPath, $prefix . \DIRECTORY_SEPARATOR)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

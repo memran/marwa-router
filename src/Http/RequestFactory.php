@@ -184,18 +184,38 @@ final class RequestFactory
      */
     private static function resolveRemoteAddr(array $server): ?string
     {
-        if (!self::isTrustedProxyServer($server)) {
-            $remoteAddr = (string) ($server['REMOTE_ADDR'] ?? '');
+        $remoteAddr = (string) ($server['REMOTE_ADDR'] ?? '');
 
+        if (!self::isTrustedProxyServer($server)) {
             return $remoteAddr !== '' ? $remoteAddr : null;
         }
 
-        $forwardedFor = self::firstForwardedValue((string) ($server['HTTP_X_FORWARDED_FOR'] ?? ''));
-        if ($forwardedFor !== null && filter_var($forwardedFor, FILTER_VALIDATE_IP) !== false) {
-            return $forwardedFor;
-        }
+        // Walk X-Forwarded-For from right (closest proxy) to left, skipping
+        // trusted proxies. The first untrusted IP is the real client. The
+        // leftmost value is client-controlled and must never be trusted
+        // blindly, otherwise clients can spoof their IP.
+        $forwardedFor = (string) ($server['HTTP_X_FORWARDED_FOR'] ?? '');
+        if ($forwardedFor !== '') {
+            $ips = [];
+            foreach (explode(',', $forwardedFor) as $candidate) {
+                $candidate = trim($candidate);
+                if ($candidate !== '' && filter_var($candidate, FILTER_VALIDATE_IP) !== false) {
+                    $ips[] = $candidate;
+                }
+            }
 
-        $remoteAddr = (string) ($server['REMOTE_ADDR'] ?? '');
+            for ($i = count($ips) - 1; $i >= 0; $i--) {
+                if (!self::isTrustedProxy($ips[$i])) {
+                    return $ips[$i];
+                }
+            }
+
+            // Every hop is a trusted proxy: the leftmost is the original
+            // client as reported by the outermost trusted proxy.
+            if ($ips !== []) {
+                return $ips[0];
+            }
+        }
 
         return $remoteAddr !== '' ? $remoteAddr : null;
     }
@@ -287,7 +307,7 @@ final class RequestFactory
             return;
         }
 
-        $normalizedHost = strtolower(trim($host));
+        $normalizedHost = self::stripPort(strtolower(trim($host)));
         if ($normalizedHost === '') {
             throw new UntrustedHostException('Request host is empty.');
         }
@@ -299,6 +319,22 @@ final class RequestFactory
         }
 
         throw new UntrustedHostException(sprintf('Untrusted request host: %s', $host));
+    }
+
+    /**
+     * Strip an optional port suffix ("example.com:8080", "[::1]:8080").
+     */
+    private static function stripPort(string $host): string
+    {
+        if (str_starts_with($host, '[')) {
+            $end = strpos($host, ']');
+
+            return $end === false ? $host : substr($host, 0, $end + 1);
+        }
+
+        $colon = strpos($host, ':');
+
+        return $colon === false ? $host : substr($host, 0, $colon);
     }
 
     private static function hostMatches(string $host, string $pattern): bool

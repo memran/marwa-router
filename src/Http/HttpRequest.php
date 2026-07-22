@@ -15,6 +15,19 @@ use Psr\Http\Message\ServerRequestInterface;
  */
 final class HttpRequest
 {
+    /**
+     * Request attributes set by this package's own middleware. These are
+     * never route parameters and must not leak into routeParams().
+     *
+     * @var array<string, true>
+     */
+    private const RESERVED_ATTRIBUTES = [
+        'csrf_token' => true,
+        'auth_token' => true,
+        'auth_token_identity' => true,
+        'request_id' => true,
+    ];
+
     private ServerRequestInterface $request;
     /** @var array<string,mixed>|null */
     private ?array $allCache = null;
@@ -114,10 +127,11 @@ final class HttpRequest
             return $attr['params'];
         }
 
-        // Fallback: collect scalar attributes
+        // Fallback: collect scalar attributes, excluding attributes that
+        // were set by this package's own middleware (e.g. csrf_token).
         $out = [];
         foreach ($attr as $k => $v) {
-            if (is_scalar($v)) {
+            if (is_scalar($v) && !isset(self::RESERVED_ATTRIBUTES[$k])) {
                 $out[$k] = $v;
             }
         }

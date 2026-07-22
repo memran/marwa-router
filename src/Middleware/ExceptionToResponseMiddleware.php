@@ -18,7 +18,7 @@ final class ExceptionToResponseMiddleware implements MiddlewareInterface
     private array $statusMap;
 
     /**
-     * @param array<class-string<Throwable>, int> $statusMap
+     * @param array<array-key, mixed> $statusMap map of Throwable class names to HTTP status codes (400-599)
      */
     public function __construct(
         array $statusMap = [
@@ -28,7 +28,24 @@ final class ExceptionToResponseMiddleware implements MiddlewareInterface
         private readonly bool $exposeMessages = false,
         private readonly ?LoggerInterface $logger = null,
     ) {
-        $this->statusMap = $statusMap;
+        $validated = [];
+        foreach ($statusMap as $class => $status) {
+            if (!is_string($class) || !is_a($class, Throwable::class, true)) {
+                throw new \InvalidArgumentException(sprintf(
+                    'Status map keys must be Throwable class names, got: %s',
+                    is_string($class) ? $class : get_debug_type($class),
+                ));
+            }
+            if (!is_int($status) || $status < 400 || $status > 599) {
+                throw new \InvalidArgumentException(sprintf(
+                    'Invalid status code for exception %s. Expected an integer between 400 and 599.',
+                    $class,
+                ));
+            }
+            $validated[$class] = $status;
+        }
+
+        $this->statusMap = $validated;
     }
 
     #[\Override]

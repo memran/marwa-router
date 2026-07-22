@@ -634,8 +634,22 @@ final class RouterFactory
     private function canonicalPath(string $pretty): string
     {
         $path = '/' . ltrim($pretty, '/');
+        $path = $path === '/' ? '/' : rtrim($path, '/');
 
-        return $path === '/' ? '/' : rtrim($path, '/');
+        // Normalize placeholders so "/users/{id}" and "/users/{name}" are
+        // recognized as the same route (otherwise the later one would be
+        // silently shadowed at runtime). Constraints are kept, since
+        // "/users/{id:\d+}" and "/users/{id:[a-z]+}" are distinct routes.
+        return preg_replace_callback(
+            '/\{[a-zA-Z_][a-zA-Z0-9_]*(?::[^}]+)?\}/',
+            static function (array $matches): string {
+                $inner = substr($matches[0], 1, -1);
+                $colon = strpos($inner, ':');
+
+                return $colon === false ? '{}' : '{:' . substr($inner, $colon + 1) . '}';
+            },
+            $path,
+        ) ?? $path;
     }
 
     private function canonicalDomain(?string $domain): string

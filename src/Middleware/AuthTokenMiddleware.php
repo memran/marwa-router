@@ -24,13 +24,19 @@ final class AuthTokenMiddleware implements MiddlewareInterface
         private readonly string $identityAttributeName = 'auth_token_identity',
         private readonly string $realm = 'Bearer',
     ) {
+        // Note: PHP silently casts numeric-string array keys to int, so
+        // ['12345' => 'id'] arrives as [12345 => 'id']. Use array_is_list()
+        // to distinguish list form from token => identity form, and always
+        // store keys as strings (findToken() casts back when comparing).
+        $isList = array_is_list($tokens);
+
         foreach ($tokens as $key => $value) {
-            if (is_int($key)) {
+            if ($isList) {
                 $this->tokens[(string) $value] = null;
                 continue;
             }
 
-            $this->tokens[$key] = $value;
+            $this->tokens[(string) $key] = $value;
         }
     }
 
@@ -67,8 +73,11 @@ final class AuthTokenMiddleware implements MiddlewareInterface
     private function findToken(string $token): ?string
     {
         foreach ($this->tokens as $validToken => $identity) {
-            if (hash_equals($validToken, $token)) {
-                return $validToken;
+            // Array keys for purely numeric tokens are ints; cast to string
+            // so hash_equals() never receives an int and comparison is exact.
+            $validTokenString = (string) $validToken;
+            if (hash_equals($validTokenString, $token)) {
+                return $validTokenString;
             }
         }
 

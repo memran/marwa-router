@@ -13,8 +13,17 @@ use ReflectionMethod;
 
 final class SmartApplicationStrategy extends ApplicationStrategy
 {
-    /** @var array<string, int> cached parameter counts keyed by callable identity */
-    private static array $paramCountCache = [];
+    /**
+     * Cached parameter counts for object callables (closures, invokables).
+     * A WeakMap prevents stale entries when object IDs are reused after
+     * garbage collection and avoids unbounded growth in long-running workers.
+     *
+     * @var \WeakMap<object, int>|null
+     */
+    private static ?\WeakMap $objectParamCountCache = null;
+
+    /** @var array<string, int> cached parameter counts for named callables (class::method, functions) */
+    private static array $namedParamCountCache = [];
 
     #[\Override]
     public function invokeRouteCallable(Route $route, ServerRequestInterface $request): ResponseInterface
@@ -35,44 +44,37 @@ final class SmartApplicationStrategy extends ApplicationStrategy
 
     private function countCallableParameters(callable $controller): int
     {
-        $key = $this->cacheKey($controller);
-
-        if (isset(self::$paramCountCache[$key])) {
-            return self::$paramCountCache[$key];
-        }
-
         if (is_array($controller)) {
-            $count = (new ReflectionMethod($controller[0], $controller[1]))->getNumberOfParameters();
-        } elseif ($controller instanceof \Closure) {
-            $count = (new ReflectionFunction($controller))->getNumberOfParameters();
-        } elseif (is_string($controller)) {
-            $count = (new ReflectionFunction($controller))->getNumberOfParameters();
-        } else {
-            assert(is_object($controller));
-            $count = (new ReflectionMethod($controller, '__invoke'))->getNumberOfParameters();
+            $key = (is_object($controller[0]) ? get_class($controller[0]) : $controller[0]) . '::' . $controller[1];
+            if (isset(self::$namedParamCountCache[$key])) {
+                return self::$namedParamCountCache[$key];
+            }
+
+            return self::$namedParamCountCache[$key] =
+                (new ReflectionMethod($controller[0], $controller[1]))->getNumberOfParameters();
         }
 
-        self::$paramCountCache[$key] = $count;
+        if (is_string($controller)) {
+            if (isset(self::$namedParamCountCache[$controller])) {
+                return self::$namedParamCountCache[$controller];
+            }
 
-        return $count;
-    }
-
-    private function cacheKey(callable $controller): string
-    {
-        if (is_array($controller)) {
-            $class = is_object($controller[0]) ? get_class($controller[0]) : $controller[0];
-
-            return $class . '::' . $controller[1];
-        }
-        if ($controller instanceof \Closure) {
-            return 'closure#' . spl_object_id($controller);
-        }
-        if (is_object($controller)) {
-            return get_class($controller);
+            return self::$namedParamCountCache[$controller] =
+                (new ReflectionFunction($controller))->getNumberOfParameters();
         }
 
-        assert(is_string($controller));
+        // Closures and invokable objects: keyed by object identity in a WeakMap.
+        assert(is_object($controller));
+        self::$objectParamCountCache ??= new \WeakMap();
 
-        return $controller;
+        if (isset(self::$objectParamCountCache[$controller])) {
+            return self::$objectParamCountCache[$controller];
+        }
+
+        $count = $controller instanceof \Closure
+            ? (new ReflectionFunction($controller))->getNumberOfParameters()
+            : (new ReflectionMethod($controller, '__invoke'))->getNumberOfParameters();
+
+        return self::$objectParamCountCache[$controller] = $count;
     }
 }

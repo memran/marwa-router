@@ -61,7 +61,7 @@ final class RequestGuardMiddleware implements MiddlewareInterface
                 return new JsonResponse(['message' => 'Bad Request'], 400);
             }
             foreach ($request->getQueryParams() as $k => $v) {
-                if ($this->hasCtl((string)$k) || $this->hasCtl((string)$v)) {
+                if ($this->hasCtl((string)$k) || $this->valueHasCtl($v)) {
                     return new JsonResponse(['message' => 'Bad Request'], 400);
                 }
             }
@@ -80,6 +80,29 @@ final class RequestGuardMiddleware implements MiddlewareInterface
     private function hasCtl(string $s): bool
     {
         return (bool)preg_match(self::CTL_PATTERN, $s);
+    }
+
+    /**
+     * Recursively check nested query values (e.g. ?a[b]=1) without
+     * triggering "Array to string conversion" warnings.
+     */
+    private function valueHasCtl(mixed $value): bool
+    {
+        if (is_array($value)) {
+            foreach ($value as $key => $item) {
+                if ($this->hasCtl((string)$key) || $this->valueHasCtl($item)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        if (is_scalar($value)) {
+            return $this->hasCtl((string)$value);
+        }
+
+        return false;
     }
 
     private function normalizePath(string $p): string

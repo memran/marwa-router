@@ -24,7 +24,11 @@ final class ThrottleMiddleware implements MiddlewareInterface
         private readonly int $perSeconds = 60,
         private readonly string $key = 'ip', // 'ip' or header name (e.g. 'X-API-Key')
         private readonly ?LoggerInterface $logger = null,
-    ) {}
+    ) {
+        if ($this->limit < 1 || $this->perSeconds < 1) {
+            throw new \InvalidArgumentException('Throttle limit and perSeconds must be positive integers.');
+        }
+    }
 
     #[\Override]
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
@@ -63,10 +67,23 @@ final class ThrottleMiddleware implements MiddlewareInterface
     private function bucketKey(ServerRequestInterface $req): string
     {
         $id = $this->key === 'ip'
-            ? ($req->getServerParams()['REMOTE_ADDR'] ?? '0.0.0.0')
-            : ($req->getHeaderLine($this->key) ?: ($req->getServerParams()['REMOTE_ADDR'] ?? '0.0.0.0'));
+            ? $this->remoteAddr($req)
+            : ($req->getHeaderLine($this->key) ?: $this->remoteAddr($req));
 
-        $bucket = (int) floor(time() / max(1, $this->perSeconds));
-        return 'throttle:' . $this->key . ':' . $id . ':' . $bucket . ':' . $this->perSeconds;
+        // Build a PSR-16-compliant key: {}()/\@: are reserved characters
+        // and strict cache implementations reject them. Header values are
+        // client-controlled, so the identifier is hashed, and unsafe
+        // characters in the key name are replaced.
+        $safeKey = preg_replace('/[^A-Za-z0-9_.\-]/', '_', $this->key) ?? 'key';
+        $bucket = (int) floor(time() / $this->perSeconds);
+
+        return 'throttle_' . $safeKey . '_' . hash('sha256', $id) . '_' . $bucket . '_' . $this->perSeconds;
+    }
+
+    private function remoteAddr(ServerRequestInterface $req): string
+    {
+        $addr = $req->getServerParams()['REMOTE_ADDR'] ?? null;
+
+        return is_string($addr) && $addr !== '' ? $addr : '0.0.0.0';
     }
 }

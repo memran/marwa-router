@@ -88,7 +88,14 @@ final class UrlGenerator
             return false;
         }
 
-        $query = $this->parseQuery($parts['query'] ?? null);
+        // Strict parse: any non-scalar (array/nested) query value is not
+        // covered by the signature, so such URLs must fail verification
+        // instead of silently dropping the unsigned data.
+        $query = $this->parseQueryStrict($parts['query'] ?? null);
+        if ($query === null) {
+            return false;
+        }
+
         $userSig = $query['sig'] ?? null;
         $exp = $query['exp'] ?? null;
         unset($query['sig']);
@@ -111,6 +118,19 @@ final class UrlGenerator
      */
     private function parseQuery(?string $queryString): array
     {
+        $result = $this->parseQueryStrict($queryString);
+
+        return $result ?? [];
+    }
+
+    /**
+     * Like parseQuery(), but returns null when any value is non-scalar
+     * (e.g. nested array syntax "a[b]=1") instead of dropping it.
+     *
+     * @return array<string, string>|null
+     */
+    private function parseQueryStrict(?string $queryString): ?array
+    {
         if ($queryString === null || $queryString === '') {
             return [];
         }
@@ -119,9 +139,10 @@ final class UrlGenerator
 
         $result = [];
         foreach ($query as $key => $value) {
-            if (is_scalar($value)) {
-                $result[(string) $key] = (string) $value;
+            if (!is_scalar($value)) {
+                return null;
             }
+            $result[(string) $key] = (string) $value;
         }
 
         return $result;

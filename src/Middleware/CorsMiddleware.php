@@ -79,7 +79,17 @@ final class CorsMiddleware implements MiddlewareInterface
         );
 
         if ($this->allowedOrigins !== ['*']) {
-            $response = $response->withHeader('Vary', 'Origin');
+            $vary = $response->getHeader('Vary');
+            $hasOrigin = false;
+            foreach ($vary as $value) {
+                if (in_array('origin', array_map('strtolower', array_map('trim', explode(',', $value))), true)) {
+                    $hasOrigin = true;
+                    break;
+                }
+            }
+            if (!$hasOrigin) {
+                $response = $response->withAddedHeader('Vary', 'Origin');
+            }
         }
 
         if ($this->allowCredentials && $this->allowedOrigins !== ['*']) {

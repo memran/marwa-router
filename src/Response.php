@@ -97,10 +97,14 @@ final class Response
         $defaultHeaders = [
             'Content-Type' => 'application/octet-stream',
             'Content-Disposition' => 'attachment; filename="' . addcslashes($filename, '"\\') . '"',
-            'Content-Length' => (string) filesize($filePath),
             'Pragma' => 'no-cache',
             'Expires' => '0',
         ];
+
+        $size = filesize($filePath);
+        if ($size !== false) {
+            $defaultHeaders['Content-Length'] = (string) $size;
+        }
 
         $headers = array_merge($defaultHeaders, $headers);
 
@@ -264,6 +268,16 @@ final class Response
                 throw new \InvalidArgumentException('Invalid SameSite value. Expected lax, strict, none, or an empty string.');
             }
             $samesite = ucfirst($normalizedSameSite);
+        }
+
+        // Prevent cookie attribute injection: path/domain are concatenated
+        // raw into the Set-Cookie header, so they must not contain
+        // separators or control characters.
+        if ($path !== '' && preg_match('/[\x00-\x20\x7F;]/', $path) === 1) {
+            throw new \InvalidArgumentException('Invalid cookie path.');
+        }
+        if ($domain !== '' && preg_match('/^[A-Za-z0-9.-]+$/', $domain) !== 1) {
+            throw new \InvalidArgumentException('Invalid cookie domain.');
         }
 
         // Auto-detect HTTPS when secure flag not explicitly set
