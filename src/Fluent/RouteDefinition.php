@@ -26,6 +26,7 @@ final class RouteDefinition
     /** @var array{limit:int,per:int,key:string}|null */
     private ?array $throttle = null;
     private bool $registered = false;
+    private bool $autoRegister = true;
 
     /**
      * @param array<int, string>|string $methods
@@ -46,6 +47,18 @@ final class RouteDefinition
     public function setNamePrefix(?string $prefix): self
     {
         $this->namePrefix = $prefix;
+        return $this;
+    }
+
+    /**
+     * Enable/disable automatic registration on destruction.
+     *
+     * When disabled, the route is only registered once register() is
+     * called explicitly. Enabled by default for backward compatibility.
+     */
+    public function setAutoRegister(bool $autoRegister): self
+    {
+        $this->autoRegister = $autoRegister;
         return $this;
     }
 
@@ -106,7 +119,7 @@ final class RouteDefinition
 
     public function __destruct()
     {
-        if ($this->registered) {
+        if ($this->registered || !$this->autoRegister) {
             return;
         }
 

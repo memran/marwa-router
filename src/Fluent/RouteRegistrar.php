@@ -18,8 +18,21 @@ final class RouteRegistrar
     private ?string $groupDomain = null;
     /** @var array{limit:int,per:int,key:string}|null */
     private ?array $groupThrottle = null;
+    private bool $autoRegister = true;
 
     public function __construct(private RouterFactory $factory) {}
+
+    /**
+     * Enable/disable automatic route registration when a definition is
+     * destructed. When disabled, each definition must be registered
+     * explicitly via RouteDefinition::register(). Enabled by default.
+     */
+    public function setAutoRegister(bool $autoRegister): self
+    {
+        $this->autoRegister = $autoRegister;
+
+        return $this;
+    }
 
     /**
      * @param array{
@@ -38,9 +51,10 @@ final class RouteRegistrar
         $child->groupPrefix      = $this->join($this->groupPrefix, (string)($opts['prefix'] ?? ''));
         $child->groupNamePrefix  = $this->joinName($this->groupNamePrefix, $opts['name'] ?? null);
         $child->groupDomain      = $opts['domain'] ?? $this->groupDomain;
-        $child->groupWhere       = $this->groupWhere + (array)($opts['where'] ?? []);
+        $child->groupWhere       = array_merge($this->groupWhere, (array)($opts['where'] ?? []));
         $child->groupMiddlewares = array_merge($this->groupMiddlewares, (array)($opts['middleware'] ?? []));
         $child->groupThrottle    = $opts['throttle'] ?? $this->groupThrottle;
+        $child->autoRegister     = $this->autoRegister;
 
         $routes($child);
     }
@@ -91,6 +105,7 @@ final class RouteRegistrar
         $rd = new RouteDefinition($this->factory, $methods, $fullPath, $handler);
 
         // hydrate group defaults
+        $rd->setAutoRegister($this->autoRegister);
         $rd->setNamePrefix($this->groupNamePrefix);
         foreach ($this->groupMiddlewares as $mw) {
             $rd->middleware($mw);

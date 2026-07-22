@@ -356,9 +356,15 @@ final class RouterFactory
         }
     }
 
-    public function fluent(): Fluent\RouteRegistrar
+    /**
+     * @param bool $autoRegister when false, definitions created by the
+     *                           registrar are only registered via an
+     *                           explicit RouteDefinition::register() call
+     *                           instead of automatically on destruction
+     */
+    public function fluent(bool $autoRegister = true): Fluent\RouteRegistrar
     {
-        return new Fluent\RouteRegistrar($this);
+        return (new Fluent\RouteRegistrar($this))->setAutoRegister($autoRegister);
     }
 
     /**

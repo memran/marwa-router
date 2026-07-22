@@ -153,6 +153,18 @@ final class UserController
 Use fluent routes for closures, bootstrap-only endpoints, or when you prefer explicit configuration.
 Route definitions register automatically when the definition goes out of scope; `->register()` is still available when you want to force registration immediately.
 
+If you prefer fully explicit registration, disable the auto-registration — definitions are then only registered when you call `->register()`:
+
+```php
+$router->fluent(autoRegister: false)->group(['prefix' => '/api'], function ($routes): void {
+    $routes->get('/ping', fn () => Response::text('pong'))
+        ->name('ping')
+        ->register(); // required, otherwise the route is never registered
+});
+```
+
+The flag propagates to nested groups and can also be toggled per registrar (`$registrar->setAutoRegister(false)`) or per definition (`->setAutoRegister(false)`).
+
 ```php
 $router->fluent()->group(['prefix' => '/api', 'name' => 'api.'], function ($routes): void {
     $routes->get('/ping', fn () => Response::text('pong'))
