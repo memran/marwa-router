@@ -121,12 +121,36 @@ final class RouteCache
     private function render(string $kind, array $payload): string
     {
         if ($this->signingKey === null) {
-            return "<?php\n\ndeclare(strict_types=1);\n\nreturn " . var_export($payload, true) . ";\n";
+            return "<?php\n\ndeclare(strict_types=1);\n\nreturn " . $this->export($payload) . ";\n";
         }
 
         $data = serialize($payload);
 
         return self::SIGNED_PREFIX . $this->sign($kind, $data) . "\n" . $data;
+    }
+
+    /**
+     * var_export() without its indentation, which made up most of the size
+     * of large caches. Lists are written without keys.
+     */
+    private function export(mixed $value): string
+    {
+        if (!is_array($value)) {
+            return var_export($value, true);
+        }
+
+        $items = [];
+        if (array_is_list($value)) {
+            foreach ($value as $item) {
+                $items[] = $this->export($item);
+            }
+        } else {
+            foreach ($value as $key => $item) {
+                $items[] = var_export($key, true) . '=>' . $this->export($item);
+            }
+        }
+
+        return '[' . implode(',', $items) . ']';
     }
 
     private function read(string $file, string $kind, string $label): mixed
