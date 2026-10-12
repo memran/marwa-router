@@ -36,6 +36,12 @@ use Marwa\Router\Exceptions\UncacheableRouteException;
  */
 final class RouteCache
 {
+    /**
+     * Signed cache files start with a PHP header that stops parsing, so the
+     * data after it is never executed, even if the file is required directly.
+     */
+    private const SIGNED_PREFIX = "<?php __halt_compiler();\nMARWA-ROUTE-CACHE:1:";
+
     public function __construct(
         private readonly ?string $signingKey = null,
     ) {}
@@ -46,15 +52,7 @@ final class RouteCache
     public function writeMetadata(string $file, array $routes): void
     {
         $this->ensureDirectory(dirname($file), 'route cache');
-
-        $payload = "<?php\n\ndeclare(strict_types=1);\n\nreturn " . var_export($routes, true) . ";\n";
-        if ($this->signingKey !== null) {
-            $signature = hash_hmac('sha256', $payload, $this->signingKey);
-            $payload = "<?php\n\ndeclare(strict_types=1);\n\n/* SIG:{$signature} */\n\nreturn " . var_export($routes, true) . ";\n";
-        }
-        if (file_put_contents($file, $payload, LOCK_EX) === false) {
-            throw new \RuntimeException('Unable to write route cache file');
-        }
+        $this->write($file, $this->render('metadata', $routes), 'Unable to write route cache file');
     }
 
     /**
@@ -62,36 +60,7 @@ final class RouteCache
      */
     public function loadMetadata(string $file): array
     {
-        if (!is_file($file)) {
-            throw new FileNotFoundException($file);
-        }
-
-        if ($this->signingKey !== null) {
-            $raw = file_get_contents($file);
-            if ($raw === false) {
-                throw new \RuntimeException('Unable to read route cache file');
-            }
-            if (!preg_match('#/\* SIG:([a-f0-9]{64}) \*/#', $raw, $sigMatch)) {
-                throw new \RuntimeException('Route cache file is missing HMAC signature');
-            }
-            $storedSig = $sigMatch[1];
-            $contentWithoutSig = preg_replace('#/\* SIG:[a-f0-9]{64} \*/\n*\n*#', '', $raw, 1) ?? $raw;
-            if (!hash_equals($storedSig, hash_hmac('sha256', $contentWithoutSig, $this->signingKey))) {
-                throw new \RuntimeException('Route cache file HMAC verification failed');
-            }
-            $tmpFile = tempnam(sys_get_temp_dir(), 'route_cache_');
-            if ($tmpFile === false) {
-                throw new \RuntimeException('Unable to create temporary file for route cache');
-            }
-            file_put_contents($tmpFile, $contentWithoutSig, LOCK_EX);
-            try {
-                $routes = require $tmpFile;
-            } finally {
-                @unlink($tmpFile);
-            }
-        } else {
-            $routes = require $file;
-        }
+        $routes = $this->read($file, 'metadata', 'Route cache file');
 
         if (!is_array($routes)) {
             throw new \UnexpectedValueException('Route cache file must return an array');
@@ -117,14 +86,7 @@ final class RouteCache
         }
 
         $table = CompiledRouteTable::build($entries, $pathMapper, $trailingSlashOptional);
-        $rendered = "<?php\n\ndeclare(strict_types=1);\n\nreturn " . var_export($table->toArray(), true) . ";\n";
-        if ($this->signingKey !== null) {
-            $signature = hash_hmac('sha256', $rendered, $this->signingKey);
-            $rendered = "/* SIG:{$signature} */\n" . $rendered;
-        }
-        if (file_put_contents($file, $rendered, LOCK_EX) === false) {
-            throw new \RuntimeException('Unable to write compiled route cache file');
-        }
+        $this->write($file, $this->render('compiled', $table->toArray()), 'Unable to write compiled route cache file');
     }
 
     /**
@@ -137,42 +99,112 @@ final class RouteCache
      */
     public function readCompiled(string $file): array|callable
     {
-        if (!is_file($file)) {
-            throw new FileNotFoundException($file);
-        }
-
-        if ($this->signingKey !== null) {
-            $raw = file_get_contents($file);
-            if ($raw === false) {
-                throw new \RuntimeException('Unable to read compiled route cache file');
-            }
-            if (!preg_match('#^/\* SIG:([a-f0-9]{64}) \*/\n#', $raw, $sigMatch)) {
-                throw new \RuntimeException('Compiled route cache file is missing HMAC signature');
-            }
-            $storedSig = $sigMatch[1];
-            $contentWithoutSig = substr($raw, strlen($sigMatch[0]));
-            if (!hash_equals($storedSig, hash_hmac('sha256', $contentWithoutSig, $this->signingKey))) {
-                throw new \RuntimeException('Compiled route cache file HMAC verification failed');
-            }
-            $tmpFile = tempnam(sys_get_temp_dir(), 'route_cache_');
-            if ($tmpFile === false) {
-                throw new \RuntimeException('Unable to create temporary file for route cache');
-            }
-            file_put_contents($tmpFile, $contentWithoutSig, LOCK_EX);
-            try {
-                $loaded = require $tmpFile;
-            } finally {
-                @unlink($tmpFile);
-            }
-        } else {
-            $loaded = require $file;
-        }
+        $loaded = $this->read($file, 'compiled', 'Compiled route cache file');
 
         if (is_callable($loaded) || is_array($loaded)) {
             return $loaded;
         }
 
         throw new \UnexpectedValueException('Compiled route cache file must return an array or a callable');
+    }
+
+    /**
+     * Unsigned caches are PHP files, so opcache keeps them in shared memory.
+     *
+     * Signed caches are data, not code: the signature covers the serialized
+     * payload, and the exact bytes that were verified are unserialized. No
+     * code from the file is ever executed, so there is no window between
+     * verifying and loading the file in which it could be swapped.
+     *
+     * @param array<mixed> $payload
+     */
+    private function render(string $kind, array $payload): string
+    {
+        if ($this->signingKey === null) {
+            return "<?php\n\ndeclare(strict_types=1);\n\nreturn " . var_export($payload, true) . ";\n";
+        }
+
+        $data = serialize($payload);
+
+        return self::SIGNED_PREFIX . $this->sign($kind, $data) . "\n" . $data;
+    }
+
+    private function read(string $file, string $kind, string $label): mixed
+    {
+        if (!is_file($file)) {
+            throw new FileNotFoundException($file);
+        }
+
+        if ($this->signingKey === null) {
+            return require $file;
+        }
+
+        $raw = file_get_contents($file);
+        if ($raw === false) {
+            throw new \RuntimeException(sprintf('Unable to read %s', lcfirst($label)));
+        }
+
+        if (!str_starts_with($raw, self::SIGNED_PREFIX)) {
+            return $this->readLegacySigned($raw, $label);
+        }
+
+        $offset = strlen(self::SIGNED_PREFIX);
+        $signature = substr($raw, $offset, 64);
+        if (strlen($signature) !== 64 || !ctype_xdigit($signature) || ($raw[$offset + 64] ?? '') !== "\n") {
+            throw new \RuntimeException($label . ' is missing HMAC signature');
+        }
+
+        $data = substr($raw, $offset + 65);
+        if (!hash_equals($this->sign($kind, $data), $signature)) {
+            throw new \RuntimeException($label . ' HMAC verification failed');
+        }
+
+        return unserialize($data, ['allowed_classes' => false]);
+    }
+
+    /**
+     * The kind is part of the signed message, so a signed metadata cache
+     * cannot be passed off as a compiled cache or the other way round.
+     */
+    private function sign(string $kind, string $data): string
+    {
+        return hash_hmac('sha256', "marwa-route-cache:{$kind}\n" . $data, (string) $this->signingKey);
+    }
+
+    /**
+     * Signed PHP files written by older versions: the signature comment is
+     * removed and the remaining code is verified, then required from a
+     * temporary file. Rewrite the cache to switch to the data format.
+     */
+    private function readLegacySigned(string $raw, string $label): mixed
+    {
+        if (!preg_match('#/\* SIG:([a-f0-9]{64}) \*/\n+#', $raw, $sigMatch, PREG_OFFSET_CAPTURE)) {
+            throw new \RuntimeException($label . ' is missing HMAC signature');
+        }
+
+        $storedSig = $sigMatch[1][0];
+        $content = substr_replace($raw, '', $sigMatch[0][1], strlen($sigMatch[0][0]));
+        if (!hash_equals($storedSig, hash_hmac('sha256', $content, (string) $this->signingKey))) {
+            throw new \RuntimeException($label . ' HMAC verification failed');
+        }
+
+        $tmpFile = tempnam(sys_get_temp_dir(), 'route_cache_');
+        if ($tmpFile === false) {
+            throw new \RuntimeException('Unable to create temporary file for route cache');
+        }
+        file_put_contents($tmpFile, $content, LOCK_EX);
+        try {
+            return require $tmpFile;
+        } finally {
+            @unlink($tmpFile);
+        }
+    }
+
+    private function write(string $file, string $contents, string $error): void
+    {
+        if (file_put_contents($file, $contents, LOCK_EX) === false) {
+            throw new \RuntimeException($error);
+        }
     }
 
     private function ensureDirectory(string $directory, string $label): void

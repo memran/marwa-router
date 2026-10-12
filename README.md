@@ -1107,6 +1107,17 @@ $router->loadCompiledRoutesFrom(__DIR__ . '/../var/cache/routes.compiled.php');
 
 The compiled cache stores the route definitions together with prebuilt FastRoute dispatch data, so loading it does not re-register routes: only the route matching a request is built. Rebuild it with `compileRoutesTo()` whenever routes change. Keep opcache enabled in production so the cache file is parsed once per worker. Routes mapped after loading the cache are still dispatched and checked for conflicts against the cached routes. Cache files written by older versions still load, through the slower re-registration path.
 
+To detect tampering with cache files, pass a signing key:
+
+```php
+use Marwa\Router\Support\RouteCache;
+
+$router = new \Marwa\Router\RouterFactory(routeCache: new RouteCache($_ENV['ROUTE_CACHE_KEY']));
+$router->loadCompiledRoutesFrom(__DIR__ . '/../var/cache/routes.compiled.php');
+```
+
+Signed caches are stored as HMAC-signed serialized data rather than PHP code: the signature is checked and the verified bytes are decoded without executing anything. They are not served from opcache, so unsigned caches load faster when the cache directory is trusted. Signed caches written by older versions still load; rebuild them to switch to the data format.
+
 Controllers and middleware given as class strings are created when a route is dispatched, not at registration. Each middleware class gets one shared instance, resolved through the container when one is set.
 
 ### Logger Example

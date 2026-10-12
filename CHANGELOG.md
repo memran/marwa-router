@@ -20,6 +20,7 @@ The format is based on Keep a Changelog and this project aims to follow Semantic
 ### Changed
 
 - compiled route cache now stores prebuilt FastRoute dispatch data per host; `loadCompiledRoutesFrom()` no longer re-registers every route, and domain routes dispatch correctly for every host in long-running workers
+- signed route caches are now HMAC-signed serialized data instead of PHP code: loading verifies the exact bytes it decodes and never executes cache contents, avoids a temporary file per load (which left a new opcache entry on every request), and is about 2.5x faster with half the file size; the signature also covers the cache kind, so a metadata cache cannot be loaded as a compiled cache. Signed files from older versions still load
 - routes registered at runtime now get dispatch data built per host and rebuilt when routes are added: domain routes work for every host in long-running workers, and routes mapped after the first dispatch are matched (previously league/route kept only the first request's host and ignored later routes)
 - optional trailing slashes are handled at match time instead of registering every route twice (`/path[/]`), roughly halving dispatch time and regex memory; optional route segments such as `/archive[/{year}]` now work with the trailing slash enabled
 - controllers and class-string middleware are resolved lazily at dispatch instead of being instantiated for every route at registration; middleware instances are shared per class
