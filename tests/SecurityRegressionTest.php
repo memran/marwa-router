@@ -241,13 +241,29 @@ final class SecurityRegressionTest extends TestCase
     // UploadedFiles: temp dir validation
     // -----------------------------------------------------------------
 
+    public function testUploadDirCheckRequiresADirectoryBoundary(): void
+    {
+        $tempDir = realpath(sys_get_temp_dir());
+        self::assertNotFalse($tempDir);
+
+        $isAllowed = new \ReflectionMethod(UploadedFiles::class, 'isWithinAllowedUploadDir');
+
+        self::assertTrue($isAllowed->invoke(null, $tempDir . \DIRECTORY_SEPARATOR . 'php123'));
+        self::assertFalse($isAllowed->invoke(null, $tempDir . '_evil_marwa_test' . \DIRECTORY_SEPARATOR . 'secret.txt'));
+    }
+
     public function testSiblingDirectoryOfTempDirIsRejected(): void
     {
         $tempDir = realpath(sys_get_temp_dir());
         self::assertNotFalse($tempDir);
 
+        // A sibling of /tmp lives in the filesystem root, which is not
+        // writable on most CI runners; the boundary itself is covered by
+        // testUploadDirCheckRequiresADirectoryBoundary().
         $sibling = $tempDir . '_evil_marwa_test';
-        @mkdir($sibling, 0777, true);
+        if (!is_dir($sibling) && !@mkdir($sibling, 0777, true)) {
+            self::markTestSkipped(sprintf('Cannot create %s to test a real sibling directory.', $sibling));
+        }
         $file = $sibling . '/secret.txt';
         file_put_contents($file, 'sensitive');
 
