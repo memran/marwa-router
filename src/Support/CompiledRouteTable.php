@@ -55,18 +55,18 @@ final class CompiledRouteTable
     public static function build(array $entries, callable $pathMapper, bool $trailingSlashOptional): self
     {
         $entries = array_values($entries);
-        $patterns = [];
+        $routes = [];
         $hosts = [];
         foreach ($entries as $id => $entry) {
-            $patterns[$id] = $pathMapper($entry['path']);
+            $routes[$id] = ['methods' => $entry['methods'], 'pattern' => $pathMapper($entry['path']), 'domain' => $entry['domain']];
             if ($entry['domain'] !== null && $entry['domain'] !== '') {
                 $hosts[$entry['domain']] = true;
             }
         }
 
-        $dispatchData = [self::ANY_HOST => self::collect($entries, $patterns, null)];
+        $dispatchData = [self::ANY_HOST => self::collectDispatchData($routes, null)];
         foreach (array_keys($hosts) as $host) {
-            $dispatchData[$host] = self::collect($entries, $patterns, $host);
+            $dispatchData[$host] = self::collectDispatchData($routes, $host);
         }
 
         return new self($entries, $dispatchData, $trailingSlashOptional);
@@ -145,21 +145,25 @@ final class CompiledRouteTable
     }
 
     /**
-     * @param array<int, CompiledRouteEntry> $entries
-     * @param array<int, string> $patterns
+     * Build FastRoute dispatch data for one host, with route ids as handlers.
+     *
+     * Routes without a domain are included for every host; routes with a
+     * domain only for that host (null builds the table for unknown hosts).
+     *
+     * @param array<int, array{methods:array<int,string>|string, pattern:string, domain:?string}> $routes
      * @return array<int, mixed>
      */
-    private static function collect(array $entries, array $patterns, ?string $host): array
+    public static function collectDispatchData(array $routes, ?string $host): array
     {
         $collector = new RouteCollector(new Std(), new GroupCountBasedGenerator());
 
-        foreach ($entries as $id => $entry) {
-            $domain = $entry['domain'] ?? '';
+        foreach ($routes as $id => $route) {
+            $domain = $route['domain'] ?? '';
             if ($domain !== '' && $domain !== $host) {
                 continue;
             }
 
-            $collector->addRoute($entry['methods'], $patterns[$id], $id);
+            $collector->addRoute($route['methods'], $route['pattern'], $id);
         }
 
         return $collector->getData();

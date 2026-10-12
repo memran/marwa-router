@@ -68,6 +68,21 @@ final class RouterFactory
     /** Whether the league router may hold routes (mapped here or before injection). */
     private bool $hasDynamicRoutes;
 
+    /** An injected router may hold routes or groups this factory does not know about. */
+    private bool $routerInjected;
+
+    /** @var array<int, LeagueRoute> routes mapped by this factory, by dispatch id */
+    private array $registeredRoutes = [];
+
+    /** @var array<int, string> dispatch id => domain, for routes restricted to a domain */
+    private array $registeredRouteDomains = [];
+
+    /** @var array<string, true> domains used by registered routes */
+    private array $registeredDomains = [];
+
+    /** @var array<string, array<int, mixed>> host ("*" for any other host) => FastRoute dispatch data */
+    private array $registeredDispatchData = [];
+
     /** Whether compiled routes still need to be added to the conflict-detection index. */
     private bool $compiledConflictKeysPending = false;
 
@@ -97,6 +112,7 @@ final class RouterFactory
         $this->cache = $cache;
         $this->router = $router ?? new LeagueRouter();
         $this->hasDynamicRoutes = $router !== null;
+        $this->routerInjected = $router !== null;
         $this->container = $container;
         $this->routeCache = $routeCache ?? new RouteCache();
 
@@ -412,7 +428,7 @@ final class RouterFactory
                 );
 
                 $this->configureMappedRoutes(
-                    $this->mapRoutes($target, $methods, $mappedPath, $handler),
+                    $this->mapRoutes($target, $methods, $mappedPath, $handler, $effectiveDomain),
                     $routeName,
                     $middlewares,
                     $effectiveDomain,
@@ -513,7 +529,7 @@ final class RouterFactory
         }
 
         $this->configureMappedRoutes(
-            $this->mapRoutes($this->router, $finalMethods, $mappedPath, $callable),
+            $this->mapRoutes($this->router, $finalMethods, $mappedPath, $callable, $domain),
             $name,
             $middlewares,
             $domain,
@@ -608,11 +624,53 @@ final class RouterFactory
     }
 
     /**
-     * Same steps as League\Route\Router::dispatch(), but with a dispatcher
-     * that treats the trailing slash as optional instead of registering
-     * every route twice.
+     * Dispatch routes registered on the league router.
+     *
+     * league/route prepares its dispatch data once, keeping only the routes
+     * whose domain matches the first request, and ignores routes added
+     * afterwards. Dispatch data is built here per host instead and rebuilt
+     * when routes are added, so every domain works in long-running workers.
      */
     private function dispatchRegistered(ServerRequestInterface $request): ResponseInterface
+    {
+        if ($this->routerInjected || $this->router->getStrategy() instanceof OptionsHandlerInterface) {
+            return $this->dispatchPreparedByLeague($request);
+        }
+
+        $host = $request->getUri()->getHost();
+        $key = isset($this->registeredDomains[$host]) ? $host : '*';
+        $data = $this->registeredDispatchData[$key] ??= $this->collectRegisteredDispatchData($key === '*' ? null : $host);
+
+        return $this->dispatchWith(new RouteDispatcher(
+            $data,
+            $this->trailingSlashOptional,
+            fn (int $id): LeagueRoute => $this->registeredRoutes[$id],
+        ), $request);
+    }
+
+    /**
+     * @return array<int, mixed>
+     */
+    private function collectRegisteredDispatchData(?string $host): array
+    {
+        $routes = [];
+        foreach ($this->registeredRoutes as $id => $route) {
+            $routes[$id] = [
+                'methods' => $route->getMethod(),
+                'pattern' => $this->toFastRoutePattern($route->getPath()),
+                'domain' => $this->registeredRouteDomains[$id] ?? null,
+            ];
+        }
+
+        return CompiledRouteTable::collectDispatchData($routes, $host);
+    }
+
+    /**
+     * Same steps as League\Route\Router::dispatch(), for routers holding
+     * routes this factory did not map (injected routers) and for strategies
+     * that need league/route's generated OPTIONS routes.
+     */
+    private function dispatchPreparedByLeague(ServerRequestInterface $request): ResponseInterface
     {
         /** @var array<int, mixed> $data */
         $data = (function (ServerRequestInterface $request): array {
@@ -886,13 +944,31 @@ final class RouterFactory
      * @param callable|class-string|array{0: object|class-string, 1: non-empty-string} $handler
      * @return array<int, \League\Route\Route>
      */
-    private function mapRoutes(LeagueRouter $target, array $methods, string $path, callable|array|string $handler): array
-    {
+    private function mapRoutes(
+        LeagueRouter $target,
+        array $methods,
+        string $path,
+        callable|array|string $handler,
+        ?string $domain,
+    ): array {
         $this->hasDynamicRoutes = true;
+        $domain = $domain === '' ? null : $domain;
+        if ($domain !== null) {
+            $this->registeredDomains[$domain] = true;
+        }
+
         $routes = [];
         foreach ($methods as $method) {
-            $routes[] = $target->map($method, $path, $handler);
+            $route = $target->map($method, $path, $handler);
+            $this->registeredRoutes[] = $route;
+            if ($domain !== null) {
+                $this->registeredRouteDomains[array_key_last($this->registeredRoutes)] = $domain;
+            }
+            $routes[] = $route;
         }
+
+        // Rebuilt on the next dispatch so routes added later are matched too.
+        $this->registeredDispatchData = [];
 
         return $routes;
     }
