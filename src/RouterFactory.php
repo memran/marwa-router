@@ -80,7 +80,7 @@ final class RouterFactory
     /** @var array<string, true> domains used by registered routes */
     private array $registeredDomains = [];
 
-    /** @var array<string, array<int, mixed>> host ("*" for any other host) => FastRoute dispatch data */
+    /** @var array<string, array<mixed>> host ("*" for any other host) => dispatch data */
     private array $registeredDispatchData = [];
 
     /** Whether compiled routes still need to be added to the conflict-detection index. */
@@ -649,7 +649,7 @@ final class RouterFactory
     }
 
     /**
-     * @return array<int, mixed>
+     * @return array<mixed>
      */
     private function collectRegisteredDispatchData(?string $host): array
     {

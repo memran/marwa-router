@@ -1105,7 +1105,7 @@ $router = new \Marwa\Router\RouterFactory();
 $router->loadCompiledRoutesFrom(__DIR__ . '/../var/cache/routes.compiled.php');
 ```
 
-The compiled cache stores the route definitions together with prebuilt FastRoute dispatch data, so loading it does not re-register routes: only the route matching a request is built. Rebuild it with `compileRoutesTo()` whenever routes change. Keep opcache enabled in production so the cache file is parsed once per worker. Routes mapped after loading the cache are still dispatched and checked for conflicts against the cached routes. Cache files written by older versions still load, through the slower re-registration path.
+The compiled cache stores the route definitions together with prebuilt dispatch data, so loading it does not re-register routes: only the route matching a request is built. Rebuild it with `compileRoutesTo()` whenever routes change. Keep opcache enabled in production so the cache file is parsed once per worker. Routes mapped after loading the cache are still dispatched and checked for conflicts against the cached routes. Cache files written by older versions still load, through the slower re-registration path.
 
 To detect tampering with cache files, pass a signing key:
 
@@ -1141,6 +1141,8 @@ Conflict detection is enabled by default. You can disable it when you intentiona
 ```php
 $router->enableConflictDetection(false);
 ```
+
+With detection disabled, a later route replaces an earlier one with the same method and path shape (placeholder names are ignored, their patterns are not). Independently of this setting, a route restricted to a domain takes precedence over a domain-less route on the same path for requests to that domain.
 
 ## Development
 

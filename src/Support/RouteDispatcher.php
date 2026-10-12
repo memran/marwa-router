@@ -9,19 +9,27 @@ use League\Route\Dispatcher;
 use League\Route\Route;
 
 /**
- * league/route dispatcher with two additions:
+ * league/route dispatcher with three additions:
  *
  * - optional trailing slash: "/users/" is matched as "/users", so each route
  *   is registered once instead of once per slash variant;
- * - compiled routes: handlers in precompiled data are route ids, and only
- *   the route that matched is built.
+ * - segment groups: with data from CompiledRouteTable::collectDispatchData(),
+ *   only the variable routes for the request's first path segment are tried;
+ * - route ids: handlers in precompiled data are route ids, and only the
+ *   route that matched is built.
  *
  * @internal
  */
 final class RouteDispatcher extends Dispatcher
 {
+    /** @var array<string, array<string, mixed>> first path segment => variable route data */
+    private array $segmentRouteData = [];
+
+    /** @var array<string, mixed> variable route data for segments without their own group */
+    private array $fallbackRouteData = [];
+
     /**
-     * @param array<int, mixed> $data
+     * @param array<mixed> $data segment-grouped data, or plain FastRoute data [static, variable]
      * @param null|Closure(int): Route $routeResolver
      */
     public function __construct(
@@ -29,6 +37,13 @@ final class RouteDispatcher extends Dispatcher
         private readonly bool $trailingSlashOptional = false,
         private readonly ?Closure $routeResolver = null,
     ) {
+        if (array_key_exists('segments', $data)) {
+            /** @var array{static:array<string, array<string, int>>, fallback:array<string, mixed>, segments:array<string, array<string, mixed>>} $data */
+            $this->segmentRouteData = $data['segments'];
+            $this->fallbackRouteData = $data['fallback'];
+            $data = [$data['static'], $data['fallback']];
+        }
+
         parent::__construct($data);
     }
 
@@ -48,7 +63,15 @@ final class RouteDispatcher extends Dispatcher
     #[\Override]
     public function dispatch($httpMethod, $uri): array
     {
-        return parent::dispatch($httpMethod, $this->trailingSlashOptional ? self::normalizePath($uri) : $uri);
+        if ($this->trailingSlashOptional) {
+            $uri = self::normalizePath($uri);
+        }
+
+        if ($this->segmentRouteData !== []) {
+            $this->variableRouteData = $this->segmentRouteData[CompiledRouteTable::requestSegment($uri)] ?? $this->fallbackRouteData;
+        }
+
+        return parent::dispatch($httpMethod, $uri);
     }
 
     /**

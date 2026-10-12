@@ -6,7 +6,6 @@ namespace Marwa\Router\Support;
 
 use FastRoute\DataGenerator\GroupCountBased as GroupCountBasedGenerator;
 use FastRoute\Dispatcher as FastRoute;
-use FastRoute\RouteCollector;
 use FastRoute\RouteParser\Std;
 
 /**
@@ -40,7 +39,7 @@ final class CompiledRouteTable
 
     /**
      * @param array<int, CompiledRouteEntry> $entries
-     * @param array<string, array<int, mixed>> $dispatchData
+     * @param array<string, array<mixed>> $dispatchData
      */
     private function __construct(
         private readonly array $entries,
@@ -87,7 +86,7 @@ final class CompiledRouteTable
 
         /** @var array<int, CompiledRouteEntry> $entries */
         $entries = $payload['routes'];
-        /** @var array<string, array<int, mixed>> $dispatchData */
+        /** @var array<string, array<mixed>> $dispatchData */
         $dispatchData = $payload['dispatch'];
 
         // Tables written before this flag existed registered both slash
@@ -96,7 +95,7 @@ final class CompiledRouteTable
     }
 
     /**
-     * @return array{version:int, trailing_slash_optional:bool, routes:array<int, CompiledRouteEntry>, dispatch:array<string, array<int, mixed>>}
+     * @return array{version:int, trailing_slash_optional:bool, routes:array<int, CompiledRouteEntry>, dispatch:array<string, array<mixed>>}
      */
     public function toArray(): array
     {
@@ -125,7 +124,7 @@ final class CompiledRouteTable
     }
 
     /**
-     * @return array<int, mixed>
+     * @return array<mixed>
      */
     public function dispatchDataFor(string $host): array
     {
@@ -145,27 +144,142 @@ final class CompiledRouteTable
     }
 
     /**
-     * Build FastRoute dispatch data for one host, with route ids as handlers.
+     * Build dispatch data for one host, with route ids as handlers.
      *
      * Routes without a domain are included for every host; routes with a
      * domain only for that host (null builds the table for unknown hosts).
      *
+     * Variable routes are grouped by their first static path segment, so a
+     * request only runs the regexes of routes that can match its first
+     * segment. Routes starting with a placeholder ("fallback" routes) are
+     * part of every group, keeping registration order between them.
+     *
+     * When several routes match the same method and path shape, a route
+     * restricted to this host wins over a domain-less one, and otherwise the
+     * last registered route wins.
+     *
      * @param array<int, array{methods:array<int,string>|string, pattern:string, domain:?string}> $routes
-     * @return array<int, mixed>
+     * @return array{static:array<string, array<string, int>>, fallback:array<string, mixed>, segments:array<string, array<string, mixed>>}
      */
     public static function collectDispatchData(array $routes, ?string $host): array
     {
-        $collector = new RouteCollector(new Std(), new GroupCountBasedGenerator());
+        $parser = new Std();
 
+        /** @var array<string, array{method:string, data:array<int, mixed>, id:int, specific:bool}> $variants */
+        $variants = [];
         foreach ($routes as $id => $route) {
             $domain = $route['domain'] ?? '';
             if ($domain !== '' && $domain !== $host) {
                 continue;
             }
 
-            $collector->addRoute($route['methods'], $route['pattern'], $id);
+            $specific = $domain !== '';
+            foreach ($parser->parse($route['pattern']) as $routeData) {
+                foreach ((array) $route['methods'] as $method) {
+                    $key = $method . "\0" . self::shapeKey($routeData);
+                    if (($variants[$key]['specific'] ?? false) && !$specific) {
+                        continue;
+                    }
+
+                    // Re-insert so the winning route keeps its own registration position.
+                    unset($variants[$key]);
+                    $variants[$key] = ['method' => $method, 'data' => $routeData, 'id' => $id, 'specific' => $specific];
+                }
+            }
         }
 
-        return $collector->getData();
+        $static = [];
+        $fallback = [];
+        $segments = [];
+        $position = 0;
+        foreach ($variants as $variant) {
+            $routeData = $variant['data'];
+            if (count($routeData) === 1 && is_string($routeData[0])) {
+                $static[$variant['method']][$routeData[0]] = $variant['id'];
+                continue;
+            }
+
+            $item = [$position++, $variant['method'], $routeData, $variant['id']];
+            $segment = self::routeSegment($routeData);
+            if ($segment === null) {
+                $fallback[] = $item;
+            } else {
+                $segments[$segment][] = $item;
+            }
+        }
+
+        $segmentData = [];
+        foreach ($segments as $segment => $items) {
+            $merged = array_merge($items, $fallback);
+            usort($merged, static fn (array $a, array $b): int => $a[0] <=> $b[0]);
+            $segmentData[(string) $segment] = self::variableRouteData($merged);
+        }
+
+        return [
+            'static' => $static,
+            'fallback' => self::variableRouteData($fallback),
+            'segments' => $segmentData,
+        ];
+    }
+
+    /**
+     * First path segment of a request path ("users" for "/users/5").
+     */
+    public static function requestSegment(string $path): string
+    {
+        $slash = strpos($path, '/', 1);
+
+        return $slash === false ? substr($path, 1) : substr($path, 1, $slash - 1);
+    }
+
+    /**
+     * Static first segment of a parsed route, or null when the first
+     * segment contains a placeholder.
+     *
+     * @param array<int, mixed> $routeData
+     */
+    private static function routeSegment(array $routeData): ?string
+    {
+        $head = $routeData[0] ?? null;
+        if (!is_string($head)) {
+            return null;
+        }
+
+        $slash = strpos($head, '/', 1);
+        if ($slash === false || $slash === 1) {
+            return null;
+        }
+
+        return substr($head, 1, $slash - 1);
+    }
+
+    /**
+     * Key identifying routes FastRoute would treat as the same route:
+     * placeholder names are ignored, their patterns are not.
+     *
+     * @param array<int, mixed> $routeData
+     */
+    private static function shapeKey(array $routeData): string
+    {
+        $key = '';
+        foreach ($routeData as $part) {
+            $key .= is_string($part) ? "s\0{$part}\0" : "v\0" . (string) $part[1] . "\0";
+        }
+
+        return $key;
+    }
+
+    /**
+     * @param array<int, array{0:int, 1:string, 2:array<int, mixed>, 3:int}> $items
+     * @return array<string, mixed>
+     */
+    private static function variableRouteData(array $items): array
+    {
+        $generator = new GroupCountBasedGenerator();
+        foreach ($items as [, $method, $routeData, $id]) {
+            $generator->addRoute($method, $routeData, $id);
+        }
+
+        return $generator->getData()[1];
     }
 }
