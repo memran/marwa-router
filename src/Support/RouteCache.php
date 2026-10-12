@@ -107,7 +107,7 @@ final class RouteCache
      * @param array<int, CompiledRouteDefinition> $definitions
      * @param callable(string): string $pathMapper converts a route path into the FastRoute pattern
      */
-    public function writeCompiled(string $file, array $definitions, callable $pathMapper): void
+    public function writeCompiled(string $file, array $definitions, callable $pathMapper, bool $trailingSlashOptional): void
     {
         $this->ensureDirectory(dirname($file), 'compiled route cache');
 
@@ -116,7 +116,7 @@ final class RouteCache
             $entries[] = $this->exportCompiledDefinition($definition);
         }
 
-        $table = CompiledRouteTable::build($entries, $pathMapper);
+        $table = CompiledRouteTable::build($entries, $pathMapper, $trailingSlashOptional);
         $rendered = "<?php\n\ndeclare(strict_types=1);\n\nreturn " . var_export($table->toArray(), true) . ";\n";
         if ($this->signingKey !== null) {
             $signature = hash_hmac('sha256', $rendered, $this->signingKey);

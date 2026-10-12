@@ -98,6 +98,8 @@ $router->setNotFoundHandler(fn () => Response::json(['message' => 'Not Found'], 
 
 Use `setContainer()` when controllers or middleware should be resolved from a PSR-11 container. Use `setCache()` when throttling is enabled.
 
+With `setTrailingSlashOptional(true)` (the default), a request for `/users/` matches the `/users` route; one trailing slash is ignored when matching, and handlers still see the original request path. Call it before registering routes. A compiled route cache keeps the setting it was built with.
+
 If your app runs behind a reverse proxy or load balancer, configure trust explicitly:
 
 ```php

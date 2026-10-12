@@ -28,10 +28,10 @@ use Marwa\Router\Http\RequestFactory;
 use Marwa\Router\Middleware\ThrottleMiddleware;
 use Marwa\Router\Strategy\SmartApplicationStrategy;
 use Marwa\Router\Support\ClassLocator;
-use Marwa\Router\Support\CompiledDispatcher;
 use Marwa\Router\Support\CompiledRouteTable;
 use Marwa\Router\Support\LazyMiddleware;
 use Marwa\Router\Support\RouteCache;
+use Marwa\Router\Support\RouteDispatcher;
 use Psr\Container\ContainerInterface;
 use Psr\Http\Message\ResponseFactoryInterface;
 use Psr\Http\Message\ResponseInterface;
@@ -115,6 +115,10 @@ final class RouterFactory
         return $this;
     }
 
+    /**
+     * When enabled (the default), "/users/" matches the "/users" route.
+     * Call this before registering routes.
+     */
     public function setTrailingSlashOptional(bool $on): self
     {
         $this->trailingSlashOptional = $on;
@@ -158,6 +162,7 @@ final class RouterFactory
             $file,
             $definitions,
             fn (string $path): string => $this->toFastRoutePattern($this->toMappable($path)),
+            $this->trailingSlashOptional,
         );
     }
 
@@ -237,7 +242,7 @@ final class RouterFactory
             return $this->dispatchCompiled($request, $this->compiledTable);
         }
 
-        return $this->router->dispatch($request);
+        return $this->dispatchRegistered($request);
     }
 
     public function handle(ServerRequestInterface $request): ResponseInterface
@@ -585,7 +590,7 @@ final class RouterFactory
         }
 
         // Routes were also mapped at runtime: the compiled table only
-        // handles requests it can match, the rest go to league/route.
+        // handles requests it can match, the rest use the registered routes.
         return $table->matches(
             $request->getUri()->getHost(),
             $request->getMethod(),
@@ -595,16 +600,40 @@ final class RouterFactory
 
     private function dispatchCompiled(ServerRequestInterface $request, CompiledRouteTable $table): ResponseInterface
     {
+        return $this->dispatchWith(new RouteDispatcher(
+            $table->dispatchDataFor($request->getUri()->getHost()),
+            $table->trailingSlashOptional(),
+            fn (int $id): LeagueRoute => $this->compiledRoutes[$id] ??= $this->buildCompiledRoute($table->entry($id)),
+        ), $request);
+    }
+
+    /**
+     * Same steps as League\Route\Router::dispatch(), but with a dispatcher
+     * that treats the trailing slash as optional instead of registering
+     * every route twice.
+     */
+    private function dispatchRegistered(ServerRequestInterface $request): ResponseInterface
+    {
+        /** @var array<int, mixed> $data */
+        $data = (function (ServerRequestInterface $request): array {
+            if (!$this->routesPrepared) {
+                $this->prepareRoutes($request);
+            }
+
+            return $this->routesData;
+        })->call($this->router, $request);
+
+        return $this->dispatchWith(new RouteDispatcher($data, $this->trailingSlashOptional), $request);
+    }
+
+    private function dispatchWith(RouteDispatcher $dispatcher, ServerRequestInterface $request): ResponseInterface
+    {
         $strategy = $this->router->getStrategy();
         if ($strategy === null) {
             $strategy = new ApplicationStrategy();
             $this->router->setStrategy($strategy);
         }
 
-        $dispatcher = new CompiledDispatcher(
-            $table->dispatchDataFor($request->getUri()->getHost()),
-            fn (int $id): LeagueRoute => $this->compiledRoutes[$id] ??= $this->buildCompiledRoute($table->entry($id)),
-        );
         $dispatcher->setStrategy($strategy);
 
         foreach ($this->router->getMiddlewareStack() as $middleware) {
@@ -689,7 +718,9 @@ final class RouterFactory
 
         $pretty = '/' . ltrim($pretty, '/');
 
-        return $this->trailingSlashOptional ? rtrim($pretty, '/') . '[/]' : $pretty;
+        // The optional trailing slash is handled when matching (see
+        // RouteDispatcher), so routes are registered without it.
+        return $this->trailingSlashOptional ? rtrim($pretty, '/') : $pretty;
     }
 
     /**

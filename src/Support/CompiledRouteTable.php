@@ -6,7 +6,6 @@ namespace Marwa\Router\Support;
 
 use FastRoute\DataGenerator\GroupCountBased as GroupCountBasedGenerator;
 use FastRoute\Dispatcher as FastRoute;
-use FastRoute\Dispatcher\GroupCountBased as GroupCountBasedDispatcher;
 use FastRoute\RouteCollector;
 use FastRoute\RouteParser\Std;
 
@@ -46,13 +45,14 @@ final class CompiledRouteTable
     private function __construct(
         private readonly array $entries,
         private readonly array $dispatchData,
+        private readonly bool $trailingSlashOptional,
     ) {}
 
     /**
      * @param array<int, CompiledRouteEntry> $entries
      * @param callable(string): string $pathMapper converts a route path into the FastRoute pattern
      */
-    public static function build(array $entries, callable $pathMapper): self
+    public static function build(array $entries, callable $pathMapper, bool $trailingSlashOptional): self
     {
         $entries = array_values($entries);
         $patterns = [];
@@ -69,7 +69,7 @@ final class CompiledRouteTable
             $dispatchData[$host] = self::collect($entries, $patterns, $host);
         }
 
-        return new self($entries, $dispatchData);
+        return new self($entries, $dispatchData, $trailingSlashOptional);
     }
 
     /**
@@ -90,16 +90,19 @@ final class CompiledRouteTable
         /** @var array<string, array<int, mixed>> $dispatchData */
         $dispatchData = $payload['dispatch'];
 
-        return new self($entries, $dispatchData);
+        // Tables written before this flag existed registered both slash
+        // variants, so they need no normalization.
+        return new self($entries, $dispatchData, ($payload['trailing_slash_optional'] ?? false) === true);
     }
 
     /**
-     * @return array{version:int, routes:array<int, CompiledRouteEntry>, dispatch:array<string, array<int, mixed>>}
+     * @return array{version:int, trailing_slash_optional:bool, routes:array<int, CompiledRouteEntry>, dispatch:array<string, array<int, mixed>>}
      */
     public function toArray(): array
     {
         return [
             'version' => self::VERSION,
+            'trailing_slash_optional' => $this->trailingSlashOptional,
             'routes' => $this->entries,
             'dispatch' => $this->dispatchData,
         ];
@@ -129,9 +132,14 @@ final class CompiledRouteTable
         return $this->dispatchData[$host] ?? $this->dispatchData[self::ANY_HOST];
     }
 
+    public function trailingSlashOptional(): bool
+    {
+        return $this->trailingSlashOptional;
+    }
+
     public function matches(string $host, string $method, string $path): bool
     {
-        $result = (new GroupCountBasedDispatcher($this->dispatchDataFor($host)))->dispatch($method, $path);
+        $result = (new RouteDispatcher($this->dispatchDataFor($host), $this->trailingSlashOptional))->dispatch($method, $path);
 
         return $result[0] !== FastRoute::NOT_FOUND;
     }
