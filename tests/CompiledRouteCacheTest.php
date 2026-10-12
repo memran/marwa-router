@@ -154,6 +154,24 @@ final class CompiledRouteCacheTest extends TestCase
         self::assertCount(2, $cached->routes());
     }
 
+    public function testRoutesListKeepsRegistrationOrderAroundALoadedTable(): void
+    {
+        $router = new RouterFactory();
+        $router->map('GET', '/b', [CountingController::class, 'show'], name: 'b');
+        $router->map('GET', '/c', [CountingController::class, 'show'], name: 'c');
+        $router->compileRoutesTo($this->file);
+
+        $cached = new RouterFactory();
+        $cached->map('GET', '/a', [CountingController::class, 'show'], name: 'a');
+        $cached->loadCompiledRoutesFrom($this->file);
+        $cached->map('GET', '/d', [CountingController::class, 'show'], name: 'd');
+
+        self::assertSame(['a', 'b', 'c', 'd'], array_column($cached->routes(), 'name'));
+
+        $cached->map('GET', '/e', [CountingController::class, 'show'], name: 'e');
+        self::assertSame(['a', 'b', 'c', 'd', 'e'], array_column($cached->routes(), 'name'));
+    }
+
     public function testConflictDetectionCoversLoadedRoutes(): void
     {
         $router = new RouterFactory();

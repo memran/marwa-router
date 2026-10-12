@@ -1107,6 +1107,15 @@ $router->loadCompiledRoutesFrom(__DIR__ . '/../var/cache/routes.compiled.php');
 
 The compiled cache stores the route definitions together with prebuilt dispatch data, so loading it does not re-register routes: only the route matching a request is built. Rebuild it with `compileRoutesTo()` whenever routes change. Keep opcache enabled in production so the cache file is parsed once per worker. Routes mapped after loading the cache are still dispatched and checked for conflicts against the cached routes. Cache files written by older versions still load, through the slower re-registration path.
 
+#### Large route tables
+
+With the compiled cache and opcache in shared memory (PHP-FPM, FrankenPHP, Apache mod_php), loading and matching costs about 0.3 ms per request and no per-request memory, measured with 10k, 50k and 100k routes. Two settings matter at that scale:
+
+- The first request on each worker compiles the cache file into opcache, which needs far more memory than the file size: about 70 MB for 10k routes, 350 MB for 50k and 700 MB for 100k. With the default `memory_limit` of 128M that request fails beyond roughly 15k routes. Compile the cache before taking traffic, for example with `opcache.preload` pointing to a script that requires the cache file, or with a warm-up request that runs with a higher memory limit.
+- Set `opcache.memory_consumption` well above the cache file size, and keep `opcache.validate_timestamps=0` in production, rebuilding the cache and reloading PHP on deploy.
+
+Without the compiled cache, every request registers all routes and builds the dispatch table on its first dispatch, which takes about 2 s and 250 MB for 100k routes.
+
 To detect tampering with cache files, pass a signing key:
 
 ```php

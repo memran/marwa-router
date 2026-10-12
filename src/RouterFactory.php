@@ -86,6 +86,13 @@ final class RouterFactory
     /** Whether compiled routes still need to be added to the conflict-detection index. */
     private bool $compiledConflictKeysPending = false;
 
+    /**
+     * Position in the registry where routes from the loaded compiled table
+     * belong; they are added on the first routes() call instead of on every
+     * load, since loading runs on every request and routes() rarely does.
+     */
+    private ?int $compiledRegistryOffset = null;
+
     /** @var array<class-string, LazyMiddleware> one shared proxy per middleware class */
     private array $lazyMiddlewares = [];
 
@@ -164,6 +171,7 @@ final class RouterFactory
     public function loadRoutesFrom(string $file): bool
     {
         $this->registry = $this->routeCache->loadMetadata($file);
+        $this->compiledRegistryOffset = null;
 
         return true;
     }
@@ -224,16 +232,7 @@ final class RouterFactory
         $this->compiledTable = $table;
         $this->compiledRoutes = [];
         $this->compiledConflictKeysPending = true;
-        foreach ($table->entries() as $entry) {
-            $this->registry[] = [
-                'methods' => $entry['methods'],
-                'path' => $entry['path'],
-                'name' => $entry['name'],
-                'controller' => $entry['controller'],
-                'action' => $entry['action'],
-                'domain' => $entry['domain'],
-            ];
-        }
+        $this->compiledRegistryOffset = count($this->registry);
 
         return true;
     }
@@ -302,6 +301,22 @@ final class RouterFactory
      */
     public function routes(): array
     {
+        if ($this->compiledRegistryOffset !== null && $this->compiledTable !== null) {
+            $compiled = [];
+            foreach ($this->compiledTable->entries() as $entry) {
+                $compiled[] = [
+                    'methods' => $entry['methods'],
+                    'path' => $entry['path'],
+                    'name' => $entry['name'],
+                    'controller' => $entry['controller'],
+                    'action' => $entry['action'],
+                    'domain' => $entry['domain'],
+                ];
+            }
+            array_splice($this->registry, $this->compiledRegistryOffset, 0, $compiled);
+            $this->compiledRegistryOffset = null;
+        }
+
         return $this->registry;
     }
 
