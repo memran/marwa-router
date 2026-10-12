@@ -56,20 +56,84 @@ final class RouteMatchingTest extends TestCase
         self::assertSame('about:users', $this->body($cached, '/users/about'));
     }
 
-    public function testEachSegmentGroupOnlyHoldsItsOwnRoutes(): void
+    public function testEachTreeNodeOnlyHoldsRoutesThatCanMatch(): void
+    {
+        $router = new RouterFactory();
+        $router->map('GET', '/{lang}/about', [MatchingController::class, 'about']);
+        $this->mapMany($router, '/users/{id}/r', 'user');
+        $this->mapMany($router, '/orders/{id}/r', 'order');
+        $router->compileRoutesTo($this->file);
+
+        $tree = $this->tree();
+        self::assertSame(['users', 'orders'], array_keys($tree['children']));
+        $usersRegex = $this->regex($tree['children']['users']);
+        self::assertStringContainsString('/users/', $usersRegex);
+        self::assertStringNotContainsString('/orders/', $usersRegex);
+        self::assertStringContainsString('/about', $usersRegex, 'routes with a shallower placeholder are part of every node');
+        self::assertStringNotContainsString('/users/', $this->regex($tree));
+    }
+
+    public function testSmallSubtreesAreNotSplit(): void
     {
         $this->source()->compileRoutesTo($this->file);
 
-        /** @var array{dispatch:array<string, array{segments:array<string, array<string, list<array{regex:string}>>>, fallback:array<string, list<array{regex:string}>>}>} $payload */
-        $payload = require $this->file;
-        $data = $payload['dispatch']['*'];
+        $tree = $this->tree();
+        self::assertSame([], $tree['children']);
+        self::assertCount(5, $tree['data']['GET'][0]['routeMap'] ?? []);
+    }
 
-        self::assertSame(['users', 'orders', 'files'], array_keys($data['segments']));
-        $usersRegex = implode('', array_column($data['segments']['users']['GET'], 'regex'));
-        self::assertStringContainsString('/users/', $usersRegex);
+    public function testRoutesSharingAPrefixAreSplitByTheirNextSegment(): void
+    {
+        $router = new RouterFactory();
+        $router->map('GET', '/api/v1/users/{id}', [MatchingController::class, 'user']);
+        $router->map('GET', '/api/v1/orders/{id}', [MatchingController::class, 'order']);
+        $router->map('GET', '/api/{version}/{page}', [MatchingController::class, 'page']);
+        $router->map('GET', '/api/v1/{lang}/about', [MatchingController::class, 'about']);
+        $this->mapMany($router, '/api/v1/users/{id}/r', 'user');
+        $this->mapMany($router, '/api/v1/orders/{id}/r', 'order');
+        $router->compileRoutesTo($this->file);
+
+        $v1 = $this->tree()['children']['api']['children']['v1'];
+        $usersRegex = $this->regex($v1['children']['users']);
         self::assertStringNotContainsString('/orders/', $usersRegex);
-        self::assertStringContainsString('/about', $usersRegex, 'fallback routes are part of every group');
-        self::assertCount(2, $data['fallback']['GET'][0]['routeMap'] ?? []);
+        self::assertStringContainsString('/about', $usersRegex);
+        self::assertStringContainsString('/api/', $usersRegex, 'the /api/{version}/{page} route is inherited');
+
+        $cached = new RouterFactory();
+        $cached->loadCompiledRoutesFrom($this->file);
+        foreach (['runtime' => $router, 'compiled' => $cached] as $label => $r) {
+            self::assertSame('user:5', $this->body($r, '/api/v1/users/5'), $label);
+            self::assertSame('order:6', $this->body($r, '/api/v1/orders/6'), $label);
+            self::assertSame('user:7', $this->body($r, '/api/v1/users/7/r39'), $label);
+            self::assertSame('page:status', $this->body($r, '/api/v2/status'), $label);
+            self::assertSame('page:users', $this->body($r, '/api/v1/users'), $label);
+            self::assertSame('about:en', $this->body($r, '/api/v1/en/about'), $label);
+            self::assertSame('user:about', $this->body($r, '/api/v1/users/about'), $label . ': the users route was registered first');
+        }
+    }
+
+    public function testCachesWithFirstSegmentGroupsStillLoad(): void
+    {
+        $payload = [
+            'version' => 2,
+            'trailing_slash_optional' => true,
+            'routes' => [[
+                'methods' => ['GET'], 'path' => '/users/{id}', 'handler' => [MatchingController::class, 'user'],
+                'name' => null, 'middlewares' => [], 'domain' => null, 'where' => null, 'throttle' => null,
+                'controller' => MatchingController::class, 'action' => 'user',
+            ]],
+            'dispatch' => ['*' => [
+                'static' => [],
+                'fallback' => [],
+                'segments' => ['users' => ['GET' => [['regex' => '~^(?|/users/([^/]+))$~', 'routeMap' => [2 => [0, ['id' => 'id']]]]]]],
+            ]],
+        ];
+        file_put_contents($this->file, '<?php return ' . var_export($payload, true) . ';');
+
+        $cached = new RouterFactory();
+        $cached->loadCompiledRoutesFrom($this->file);
+
+        self::assertSame('user:3', $this->body($cached, '/users/3/'));
     }
 
     public function testMethodNotAllowedAndHeadFallbackStillWork(): void
@@ -131,6 +195,33 @@ final class RouteMatchingTest extends TestCase
                 self::assertSame('generic', $this->body($r, '/', 'www.test'), $label);
             }
         }
+    }
+
+    private function mapMany(RouterFactory $router, string $prefix, string $action): void
+    {
+        for ($i = 0; $i < 40; $i++) {
+            $router->map('GET', $prefix . $i, [MatchingController::class, $action]);
+        }
+    }
+
+    /**
+     * @return array{data:array<string, list<array{regex:string, routeMap:array<int, mixed>}>>, children:array<string, mixed>}
+     */
+    private function tree(): array
+    {
+        /** @var array{dispatch:array<string, array{tree:array{data:array<string, list<array{regex:string, routeMap:array<int, mixed>}>>, children:array<string, mixed>}}>} $payload */
+        $payload = require $this->file;
+
+        return $payload['dispatch']['*']['tree'];
+    }
+
+    /**
+     * @param array<string, mixed> $node
+     */
+    private function regex(array $node): string
+    {
+        /** @var array{data:array<string, list<array{regex:string}>>} $node */
+        return implode('', array_column($node['data']['GET'], 'regex'));
     }
 
     /**

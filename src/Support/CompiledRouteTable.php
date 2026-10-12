@@ -30,12 +30,16 @@ use FastRoute\RouteParser\Std;
  *   controller:?string,
  *   action:?string
  * }
+ * @phpstan-type RouteTreeNode array{data:array<string, mixed>|null, children:array<string, mixed>}
  */
 final class CompiledRouteTable
 {
     public const VERSION = 2;
 
     private const ANY_HOST = '*';
+
+    /** Route tree nodes with at most this many variable routes are not split further. */
+    private const MAX_UNSPLIT_ROUTES = 32;
 
     /**
      * @param array<int, CompiledRouteEntry> $entries
@@ -149,17 +153,19 @@ final class CompiledRouteTable
      * Routes without a domain are included for every host; routes with a
      * domain only for that host (null builds the table for unknown hosts).
      *
-     * Variable routes are grouped by their first static path segment, so a
-     * request only runs the regexes of routes that can match its first
-     * segment. Routes starting with a placeholder ("fallback" routes) are
-     * part of every group, keeping registration order between them.
+     * Variable routes are placed in a tree keyed by their leading static
+     * path segments ("/api/v1/users/{id}" under api > v1 > users). A request
+     * walks the tree as deep as its own segments go and only runs the
+     * regexes stored at the node it reaches. Each node holds its own routes
+     * plus those of its ancestors (routes with a placeholder at a shallower
+     * depth, e.g. "/{lang}/about"), in registration order.
      *
      * When several routes match the same method and path shape, a route
      * restricted to this host wins over a domain-less one, and otherwise the
      * last registered route wins.
      *
      * @param array<int, array{methods:array<int,string>|string, pattern:string, domain:?string}> $routes
-     * @return array{static:array<string, array<string, int>>, fallback:array<string, mixed>, segments:array<string, array<string, mixed>>}
+     * @return array{static:array<string, array<string, int>>, tree:RouteTreeNode}
      */
     public static function collectDispatchData(array $routes, ?string $host): array
     {
@@ -189,8 +195,7 @@ final class CompiledRouteTable
         }
 
         $static = [];
-        $fallback = [];
-        $segments = [];
+        $root = ['routes' => [], 'children' => []];
         $position = 0;
         foreach ($variants as $variant) {
             $routeData = $variant['data'];
@@ -199,31 +204,119 @@ final class CompiledRouteTable
                 continue;
             }
 
-            $item = [$position++, $variant['method'], $routeData, $variant['id']];
-            $segment = self::routeSegment($routeData);
-            if ($segment === null) {
-                $fallback[] = $item;
-            } else {
-                $segments[$segment][] = $item;
-            }
+            self::insert($root, self::staticSegments($routeData), [$position++, $variant['method'], $routeData, $variant['id']]);
         }
 
-        $segmentData = [];
-        foreach ($segments as $segment => $items) {
-            $merged = array_merge($items, $fallback);
-            usort($merged, static fn (array $a, array $b): int => $a[0] <=> $b[0]);
-            $segmentData[(string) $segment] = self::variableRouteData($merged);
-        }
-
-        return [
-            'static' => $static,
-            'fallback' => self::variableRouteData($fallback),
-            'segments' => $segmentData,
-        ];
+        return ['static' => $static, 'tree' => self::buildTree($root, [], true)];
     }
 
     /**
-     * First path segment of a request path ("users" for "/users/5").
+     * @param array{routes:list<array{0:int, 1:string, 2:array<int, mixed>, 3:int}>, children:array<string, mixed>} $node
+     * @param list<string> $segments
+     * @param array{0:int, 1:string, 2:array<int, mixed>, 3:int} $item
+     */
+    private static function insert(array &$node, array $segments, array $item): void
+    {
+        if ($segments === []) {
+            $node['routes'][] = $item;
+
+            return;
+        }
+
+        $segment = array_shift($segments);
+        /** @var array{routes:list<array{0:int, 1:string, 2:array<int, mixed>, 3:int}>, children:array<string, mixed>} $child */
+        $child = $node['children'][$segment] ?? ['routes' => [], 'children' => []];
+        // Release the parent's copy so modifying the child does not copy it.
+        $node['children'][$segment] = null;
+        self::insert($child, $segments, $item);
+        $node['children'][$segment] = $child;
+    }
+
+    /**
+     * @param array{routes:list<array{0:int, 1:string, 2:array<int, mixed>, 3:int}>, children:array<string, mixed>} $node
+     * @param list<array{0:int, 1:string, 2:array<int, mixed>, 3:int}> $inherited routes of the ancestors, in registration order
+     * @return RouteTreeNode
+     */
+    private static function buildTree(array $node, array $inherited, bool $isRoot): array
+    {
+        // Small subtrees are not worth splitting: FastRoute already batches
+        // about ten routes per regex, and every node adds its own data.
+        if ($node['children'] !== [] && self::countRoutes($node) <= self::MAX_UNSPLIT_ROUTES) {
+            $node = ['routes' => self::subtreeRoutes($node), 'children' => []];
+        }
+
+        $data = null;
+        if ($node['routes'] !== [] || $isRoot) {
+            $inherited = array_merge($inherited, $node['routes']);
+            usort($inherited, static fn (array $a, array $b): int => $a[0] <=> $b[0]);
+            $data = self::variableRouteData($inherited);
+        }
+
+        $children = [];
+        foreach ($node['children'] as $segment => $child) {
+            /** @var array{routes:list<array{0:int, 1:string, 2:array<int, mixed>, 3:int}>, children:array<string, mixed>} $child */
+            $children[(string) $segment] = self::buildTree($child, $inherited, false);
+        }
+
+        // Nodes without routes of their own reuse the nearest ancestor's data.
+        return ['data' => $data, 'children' => $children];
+    }
+
+    /**
+     * @param array{routes:list<mixed>, children:array<string, mixed>} $node
+     */
+    private static function countRoutes(array $node): int
+    {
+        $count = count($node['routes']);
+        foreach ($node['children'] as $child) {
+            /** @var array{routes:list<mixed>, children:array<string, mixed>} $child */
+            $count += self::countRoutes($child);
+        }
+
+        return $count;
+    }
+
+    /**
+     * @param array{routes:list<array{0:int, 1:string, 2:array<int, mixed>, 3:int}>, children:array<string, mixed>} $node
+     * @return list<array{0:int, 1:string, 2:array<int, mixed>, 3:int}>
+     */
+    private static function subtreeRoutes(array $node): array
+    {
+        $routes = $node['routes'];
+        foreach ($node['children'] as $child) {
+            /** @var array{routes:list<array{0:int, 1:string, 2:array<int, mixed>, 3:int}>, children:array<string, mixed>} $child */
+            array_push($routes, ...self::subtreeRoutes($child));
+        }
+        usort($routes, static fn (array $a, array $b): int => $a[0] <=> $b[0]);
+
+        return $routes;
+    }
+
+    /**
+     * Variable route data for a request path: the data of the deepest tree
+     * node matching the path's leading segments.
+     *
+     * @param RouteTreeNode $tree
+     * @return array<string, mixed>
+     */
+    public static function variableRouteDataFor(array $tree, string $path): array
+    {
+        $node = $tree;
+        $data = $tree['data'] ?? [];
+        foreach (explode('/', substr($path, 1)) as $segment) {
+            $node = $node['children'][$segment] ?? null;
+            if ($node === null) {
+                break;
+            }
+            $data = $node['data'] ?? $data;
+        }
+
+        return $data;
+    }
+
+    /**
+     * First path segment of a request path ("users" for "/users/5"); used
+     * with segment-grouped data from caches written by earlier versions.
      */
     public static function requestSegment(string $path): string
     {
@@ -233,24 +326,23 @@ final class CompiledRouteTable
     }
 
     /**
-     * Static first segment of a parsed route, or null when the first
-     * segment contains a placeholder.
+     * Complete static segments a parsed route starts with: those followed
+     * by a "/" before the first placeholder ("/api/v1/{x}" gives api, v1).
      *
      * @param array<int, mixed> $routeData
+     * @return list<string>
      */
-    private static function routeSegment(array $routeData): ?string
+    private static function staticSegments(array $routeData): array
     {
         $head = $routeData[0] ?? null;
         if (!is_string($head)) {
-            return null;
+            return [];
         }
 
-        $slash = strpos($head, '/', 1);
-        if ($slash === false || $slash === 1) {
-            return null;
-        }
+        $segments = explode('/', substr($head, 1));
+        array_pop($segments);
 
-        return substr($head, 1, $slash - 1);
+        return $segments;
     }
 
     /**

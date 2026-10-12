@@ -13,8 +13,9 @@ use League\Route\Route;
  *
  * - optional trailing slash: "/users/" is matched as "/users", so each route
  *   is registered once instead of once per slash variant;
- * - segment groups: with data from CompiledRouteTable::collectDispatchData(),
- *   only the variable routes for the request's first path segment are tried;
+ * - route tree: with data from CompiledRouteTable::collectDispatchData(),
+ *   only the variable routes under the request's leading path segments
+ *   are tried;
  * - route ids: handlers in precompiled data are route ids, and only the
  *   route that matched is built.
  *
@@ -22,14 +23,18 @@ use League\Route\Route;
  */
 final class RouteDispatcher extends Dispatcher
 {
-    /** @var array<string, array<string, mixed>> first path segment => variable route data */
+    /** @var array{data:array<string, mixed>|null, children:array<string, mixed>}|null */
+    private ?array $routeTree = null;
+
+    /** @var array<string, array<string, mixed>> first path segment => variable route data (older caches) */
     private array $segmentRouteData = [];
 
-    /** @var array<string, mixed> variable route data for segments without their own group */
+    /** @var array<string, mixed> variable route data for segments without their own group (older caches) */
     private array $fallbackRouteData = [];
 
     /**
-     * @param array<mixed> $data segment-grouped data, or plain FastRoute data [static, variable]
+     * @param array<mixed> $data route tree data, first-segment groups written
+     *                           by earlier versions, or plain FastRoute data
      * @param null|Closure(int): Route $routeResolver
      */
     public function __construct(
@@ -37,7 +42,11 @@ final class RouteDispatcher extends Dispatcher
         private readonly bool $trailingSlashOptional = false,
         private readonly ?Closure $routeResolver = null,
     ) {
-        if (array_key_exists('segments', $data)) {
+        if (array_key_exists('tree', $data)) {
+            /** @var array{static:array<string, array<string, int>>, tree:array{data:array<string, mixed>|null, children:array<string, mixed>}} $data */
+            $this->routeTree = $data['tree'];
+            $data = [$data['static'], $data['tree']['data'] ?? []];
+        } elseif (array_key_exists('segments', $data)) {
             /** @var array{static:array<string, array<string, int>>, fallback:array<string, mixed>, segments:array<string, array<string, mixed>>} $data */
             $this->segmentRouteData = $data['segments'];
             $this->fallbackRouteData = $data['fallback'];
@@ -67,7 +76,9 @@ final class RouteDispatcher extends Dispatcher
             $uri = self::normalizePath($uri);
         }
 
-        if ($this->segmentRouteData !== []) {
+        if ($this->routeTree !== null) {
+            $this->variableRouteData = CompiledRouteTable::variableRouteDataFor($this->routeTree, $uri);
+        } elseif ($this->segmentRouteData !== []) {
             $this->variableRouteData = $this->segmentRouteData[CompiledRouteTable::requestSegment($uri)] ?? $this->fallbackRouteData;
         }
 

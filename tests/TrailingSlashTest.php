@@ -83,13 +83,13 @@ final class TrailingSlashTest extends TestCase
         $router->map('GET', '/users/{id}', [SlashController::class, 'user']);
         $router->compileRoutesTo($this->file);
 
-        /** @var array{trailing_slash_optional:bool, dispatch:array<string, array{static:array<string, array<string, int>>, segments:array<string, array<string, list<array{regex:string, routeMap:array<int, mixed>}>>>}>} $payload */
+        /** @var array{trailing_slash_optional:bool, dispatch:array<string, array{static:array<string, array<string, int>>, tree:array{data:array<string, list<array{regex:string, routeMap:array<int, mixed>}>>}}>} $payload */
         $payload = require $this->file;
         $data = $payload['dispatch']['*'];
 
         self::assertTrue($payload['trailing_slash_optional']);
         self::assertSame(['/users'], array_keys($data['static']['GET']));
-        self::assertCount(1, $data['segments']['users']['GET'][0]['routeMap']);
+        self::assertCount(1, $data['tree']['data']['GET'][0]['routeMap']);
     }
 
     public function testCompiledTableKeepsTheSettingItWasBuiltWith(): void
