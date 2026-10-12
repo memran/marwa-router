@@ -6,6 +6,13 @@ The format is based on Keep a Changelog and this project aims to follow Semantic
 
 ## Unreleased
 
+## 1.3.5 - 2026-10-12
+
+### Fixed
+
+- Route cache files are written to a temporary file and renamed into place, so a request served while the cache is rebuilt can no longer load a half-written file. A failed write leaves the previous cache untouched.
+- Rewriting a route cache invalidates its opcache entry, so servers running with `opcache.validate_timestamps=0` serve the new routes without a restart.
+
 ## 1.3.4 - 2026-10-12
 
 ### Upgrade notes

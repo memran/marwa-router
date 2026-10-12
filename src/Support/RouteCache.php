@@ -224,10 +224,39 @@ final class RouteCache
         }
     }
 
+    /**
+     * Write to a temporary file and rename it into place: require() ignores
+     * file locks, so a request must never see a half-written cache file.
+     */
     private function write(string $file, string $contents, string $error): void
     {
-        if (file_put_contents($file, $contents, LOCK_EX) === false) {
+        $directory = dirname($file);
+        $tmpFile = @tempnam($directory, basename($file) . '.tmp');
+        if ($tmpFile === false) {
             throw new \RuntimeException($error);
+        }
+
+        // tempnam() falls back to the system temp dir, where rename() is not atomic.
+        if (realpath(dirname($tmpFile)) !== realpath($directory)) {
+            @unlink($tmpFile);
+
+            throw new \RuntimeException($error);
+        }
+
+        // tempnam() creates the file as 0600; keep the mode a plain write would give.
+        if (
+            file_put_contents($tmpFile, $contents) === false
+            || !chmod($tmpFile, 0666 & ~umask())
+            || !rename($tmpFile, $file)
+        ) {
+            @unlink($tmpFile);
+
+            throw new \RuntimeException($error);
+        }
+
+        // With opcache.validate_timestamps=0 the old file stays cached until invalidated.
+        if (function_exists('opcache_invalidate')) {
+            @opcache_invalidate($file, true);
         }
     }
 
