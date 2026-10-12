@@ -6,7 +6,6 @@ namespace Marwa\Router\Support;
 
 use Marwa\Router\Exceptions\FileNotFoundException;
 use Marwa\Router\Exceptions\UncacheableRouteException;
-use Marwa\Router\RouterFactory;
 
 /**
  * Internal helper for route metadata and compiled cache persistence.
@@ -19,8 +18,8 @@ use Marwa\Router\RouterFactory;
  *   action:?string,
  *   domain:?string
  * }
- * @phpstan-type CacheableRouteHandler string|array{0:class-string,1:non-empty-string}
- * @phpstan-type RouteHandler callable|string|array{0: object|class-string, 1: non-empty-string}
+ * @phpstan-type CacheableRouteHandler callable-string|class-string|array{0:class-string,1:non-empty-string}
+ * @phpstan-type RouteHandler callable|class-string|array{0: object|class-string, 1: non-empty-string}
  * @phpstan-type CompiledRouteDefinition array{
  *   methods:array<int,string>,
  *   path:string,
@@ -29,18 +28,11 @@ use Marwa\Router\RouterFactory;
  *   middlewares:array<int,class-string|object>,
  *   domain:?string,
  *   where:?array<string,string>,
- *   throttle:?array{limit:int,per:int,key:string}
+ *   throttle:?array{limit:int,per:int,key:string},
+ *   controller:?string,
+ *   action:?string
  * }
- * @phpstan-type ExportedCompiledRouteDefinition array{
- *   methods:array<int,string>,
- *   path:string,
- *   handler:CacheableRouteHandler,
- *   name:?string,
- *   middlewares:array<int,class-string>,
- *   domain:?string,
- *   where:?array<string,string>,
- *   throttle:?array{limit:int,per:int,key:string}
- * }
+ * @phpstan-import-type CompiledRouteEntry from CompiledRouteTable
  */
 final class RouteCache
 {
@@ -109,41 +101,23 @@ final class RouteCache
     }
 
     /**
+     * Write the compiled route table: route definitions plus prebuilt
+     * FastRoute dispatch data, so loading it skips route registration.
+     *
      * @param array<int, CompiledRouteDefinition> $definitions
+     * @param callable(string): string $pathMapper converts a route path into the FastRoute pattern
      */
-    public function writeCompiled(string $file, array $definitions): void
+    public function writeCompiled(string $file, array $definitions, callable $pathMapper): void
     {
         $this->ensureDirectory(dirname($file), 'compiled route cache');
 
-        $compiled = [];
+        $entries = [];
         foreach ($definitions as $definition) {
-            $compiled[] = $this->exportCompiledDefinition($definition);
+            $entries[] = $this->exportCompiledDefinition($definition);
         }
 
-        $payload = <<<PHP
-<?php
-
-declare(strict_types=1);
-
-return static function (\Marwa\Router\RouterFactory \$router): void {
-    \$routes = %s;
-
-    foreach (\$routes as \$route) {
-        \$router->map(
-            \$route['methods'],
-            \$route['path'],
-            \$route['handler'],
-            \$route['name'],
-            \$route['middlewares'],
-            \$route['domain'],
-            \$route['where'],
-            \$route['throttle'],
-        );
-    }
-};
-PHP;
-
-        $rendered = sprintf($payload, var_export($compiled, true));
+        $table = CompiledRouteTable::build($entries, $pathMapper);
+        $rendered = "<?php\n\ndeclare(strict_types=1);\n\nreturn " . var_export($table->toArray(), true) . ";\n";
         if ($this->signingKey !== null) {
             $signature = hash_hmac('sha256', $rendered, $this->signingKey);
             $rendered = "/* SIG:{$signature} */\n" . $rendered;
@@ -153,7 +127,15 @@ PHP;
         }
     }
 
-    public function loadCompiled(string $file, RouterFactory $router): bool
+    /**
+     * Read a compiled route cache file.
+     *
+     * Returns the compiled table payload, or a loader callable for files
+     * written by older versions (which re-register every route).
+     *
+     * @return array<mixed>|callable
+     */
+    public function readCompiled(string $file): array|callable
     {
         if (!is_file($file)) {
             throw new FileNotFoundException($file);
@@ -178,21 +160,19 @@ PHP;
             }
             file_put_contents($tmpFile, $contentWithoutSig, LOCK_EX);
             try {
-                $loader = require $tmpFile;
+                $loaded = require $tmpFile;
             } finally {
                 @unlink($tmpFile);
             }
         } else {
-            $loader = require $file;
+            $loaded = require $file;
         }
 
-        if (!is_callable($loader)) {
-            throw new \UnexpectedValueException('Compiled route cache file must return a callable');
+        if (is_callable($loaded) || is_array($loaded)) {
+            return $loaded;
         }
 
-        $loader($router);
-
-        return true;
+        throw new \UnexpectedValueException('Compiled route cache file must return an array or a callable');
     }
 
     private function ensureDirectory(string $directory, string $label): void
@@ -204,7 +184,7 @@ PHP;
 
     /**
      * @param CompiledRouteDefinition $definition
-     * @return ExportedCompiledRouteDefinition
+     * @return CompiledRouteEntry
      */
     private function exportCompiledDefinition(array $definition): array
     {
@@ -224,6 +204,8 @@ PHP;
             'domain' => $definition['domain'],
             'where' => $definition['where'],
             'throttle' => $definition['throttle'],
+            'controller' => $definition['controller'],
+            'action' => $definition['action'],
         ];
     }
 

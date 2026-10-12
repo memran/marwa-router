@@ -1096,12 +1096,16 @@ $router->loadRoutesFrom(__DIR__ . '/../var/cache/routes.php');
 
 This only restores the route metadata returned by `routes()`. It does not rebuild runtime dispatch rules by itself, so keep normal route registration in your application bootstrap.
 
-Load the compiled bootstrap cache instead when you want faster startup:
+Load the compiled cache instead when you want faster startup:
 
 ```php
 $router = new \Marwa\Router\RouterFactory();
 $router->loadCompiledRoutesFrom(__DIR__ . '/../var/cache/routes.compiled.php');
 ```
+
+The compiled cache stores the route definitions together with prebuilt FastRoute dispatch data, so loading it does not re-register routes: only the route matching a request is built. Rebuild it with `compileRoutesTo()` whenever routes change. Keep opcache enabled in production so the cache file is parsed once per worker. Routes mapped after loading the cache are still dispatched and checked for conflicts against the cached routes. Cache files written by older versions still load, through the slower re-registration path.
+
+Controllers and middleware given as class strings are created when a route is dispatched, not at registration. Each middleware class gets one shared instance, resolved through the container when one is set.
 
 ### Logger Example
 

@@ -19,5 +19,7 @@ The format is based on Keep a Changelog and this project aims to follow Semantic
 
 ### Changed
 
+- compiled route cache now stores prebuilt FastRoute dispatch data per host; `loadCompiledRoutesFrom()` no longer re-registers every route, and domain routes dispatch correctly for every host in long-running workers
+- controllers and class-string middleware are resolved lazily at dispatch instead of being instantiated for every route at registration; middleware instances are shared per class
 - `RequestFactory::fromGlobals()` now uses the same normalization path as `fromArrays()`
 - router not-found failures now use dedicated exceptions instead of generic runtime exceptions
