@@ -317,13 +317,13 @@ php bin/routes-dump.php --bootstrap=/absolute/path/to/bootstrap.php
 ### 9. Export the Route Registry
 
 ```bash
-php bin/routes-build-cache.php
+php bin/routes-build-cache.php --dir=/absolute/path/to/src/Controller --out=/absolute/path/to/var/cache
 ```
 
-This writes:
+`--dir` can be repeated; without options the script uses `examples/Controllers` and `var/cache`. This writes:
 
-- `var/cache/routes.php` with route metadata
-- `var/cache/routes.compiled.php` with a bootstrap callable that re-registers cacheable routes without rescanning controller files
+- `routes.php` with route metadata
+- `routes.compiled.php` with the compiled route table, loaded with `loadCompiledRoutesFrom()` without rescanning controller files or re-registering routes
 
 Compiled route cache supports string handlers, `[class-string, method]` handlers, and middleware defined as class strings. It does not support closures or object middleware.
 

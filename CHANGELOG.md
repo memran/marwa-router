@@ -8,6 +8,7 @@ The format is based on Keep a Changelog and this project aims to follow Semantic
 
 ### Added
 
+- `--dir` and `--out` options for `bin/routes-build-cache.php`
 - `RouterFactory::handle()` for request handling without immediate SAPI emission
 - trusted proxy support in `Marwa\Router\Http\RequestFactory` via `trustProxies()` and `clearTrustedProxies()`
 - trusted host allowlisting in `Marwa\Router\Http\RequestFactory` via `trustHosts()` and `clearTrustedHosts()`
