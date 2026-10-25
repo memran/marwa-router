@@ -23,7 +23,7 @@ use FastRoute\RouteParser\Std;
  *   path:string,
  *   handler:callable-string|class-string|array{0:class-string,1:non-empty-string},
  *   name:?string,
- *   middlewares:array<int,class-string>,
+ *   middlewares:array<int,string>,
  *   domain:?string,
  *   where:?array<string,string>,
  *   throttle:?array{limit:int,per:int,key:string},

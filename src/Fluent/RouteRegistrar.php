@@ -11,7 +11,7 @@ final class RouteRegistrar
 {
     private string $groupPrefix = '';
     private ?string $groupNamePrefix = null;
-    /** @var array<class-string|object> */
+    /** @var array<string|object> */
     private array $groupMiddlewares = [];
     /** @var array<string,string> */
     private array $groupWhere = [];
@@ -40,7 +40,7 @@ final class RouteRegistrar
      *   name?:string,
      *   domain?:string,
      *   where?:array<string,string>,
-     *   middleware?:array<int, class-string|object>,
+     *   middleware?:array<int, string|object>,
      *   throttle?:array{limit:int,per:int,key:string}
      * } $opts
      */

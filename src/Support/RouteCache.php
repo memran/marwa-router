@@ -25,7 +25,7 @@ use Marwa\Router\Exceptions\UncacheableRouteException;
  *   path:string,
  *   handler:RouteHandler,
  *   name:?string,
- *   middlewares:array<int,class-string|object>,
+ *   middlewares:array<int,string|object>,
  *   domain:?string,
  *   where:?array<string,string>,
  *   throttle:?array{limit:int,per:int,key:string},
@@ -274,7 +274,7 @@ final class RouteCache
     private function exportCompiledDefinition(array $definition): array
     {
         $handler = $this->exportCacheableHandler($definition['handler']);
-        /** @var array<int, class-string> $middlewares */
+        /** @var array<int, string> $middlewares */
         $middlewares = array_map(
             fn (string|object $middleware): string => $this->exportCacheableMiddleware($middleware),
             $definition['middlewares'],

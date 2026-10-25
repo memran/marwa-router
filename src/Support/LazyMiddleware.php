@@ -13,9 +13,10 @@ use Psr\Http\Server\RequestHandlerInterface;
 /**
  * Defers middleware construction until the first request that needs it.
  *
- * One proxy is shared by every route using the same middleware class, so
- * registering thousands of routes does not instantiate thousands of
- * middleware objects up front.
+ * One proxy is shared by every route using the same middleware identifier,
+ * so registering thousands of routes does not instantiate thousands of
+ * middleware objects up front. The identifier, not the class: two routes
+ * requiring different permissions from the same class need separate proxies.
  *
  * @internal
  */
@@ -24,10 +25,11 @@ final class LazyMiddleware implements MiddlewareInterface
     private ?MiddlewareInterface $instance = null;
 
     /**
+     * @param string $identifier a class string or `Class:arg1,arg2`, used to name the middleware in errors
      * @param Closure(): object $factory
      */
     public function __construct(
-        private readonly string $class,
+        private readonly string $identifier,
         private readonly Closure $factory,
     ) {}
 
@@ -46,7 +48,7 @@ final class LazyMiddleware implements MiddlewareInterface
         if (!$middleware instanceof MiddlewareInterface) {
             throw new \UnexpectedValueException(sprintf(
                 'Middleware %s must implement %s.',
-                $this->class,
+                $this->identifier,
                 MiddlewareInterface::class,
             ));
         }

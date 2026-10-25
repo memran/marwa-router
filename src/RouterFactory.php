@@ -55,7 +55,7 @@ final class RouterFactory
     private ?ContainerInterface $container;
     private ?CacheInterface $cache;
     private ?LoggerInterface $logger = null;
-    /** @var array<int, array{methods:array<int,string>,path:string,handler:callable|class-string|array{0: object|class-string, 1: non-empty-string},name:?string,middlewares:array<int,class-string|object>,domain:?string,where:?array<string,string>,throttle:?array{limit:int,per:int,key:string},controller:?string,action:?string}> */
+    /** @var array<int, array{methods:array<int,string>,path:string,handler:callable|class-string|array{0: object|class-string, 1: non-empty-string},name:?string,middlewares:array<int,string|object>,domain:?string,where:?array<string,string>,throttle:?array{limit:int,per:int,key:string},controller:?string,action:?string}> */
     private array $compiledDefinitions = [];
     private RouteCache $routeCache;
 
@@ -93,7 +93,7 @@ final class RouterFactory
      */
     private ?int $compiledRegistryOffset = null;
 
-    /** @var array<class-string, LazyMiddleware> one shared proxy per middleware class */
+    /** @var array<string, LazyMiddleware> one shared proxy per middleware identifier */
     private array $lazyMiddlewares = [];
 
     /** @var array<string, true> */
@@ -378,7 +378,7 @@ final class RouterFactory
 
     /**
      * @param ReflectionClass<object> $controller
-     * @param array<class-string> $classMiddlewares
+     * @param array<string> $classMiddlewares
      * @param array<string, string> $classWhere
      */
     private function registerControllerMethods(
@@ -495,7 +495,7 @@ final class RouterFactory
     /**
      * @param array<int, string>|string $methods
      * @param callable|class-string|array{0: object|class-string, 1: non-empty-string} $handler
-     * @param array<class-string|object> $middlewares
+     * @param array<string|object> $middlewares
      * @param array<string, string>|null $where
      * @param array{limit:int,per:int,key:string}|null $throttle
      */
@@ -594,7 +594,7 @@ final class RouterFactory
     }
 
     /**
-     * @param class-string|object $middleware
+     * @param string|object $middleware a class string, `Class:arg1,arg2`, or an instance
      */
     private function resolveMiddleware(string|object $middleware): object
     {
@@ -602,16 +602,71 @@ final class RouterFactory
             return $middleware;
         }
 
-        if (!class_exists($middleware)) {
-            throw new \InvalidArgumentException(sprintf('Middleware class does not exist: %s', $middleware));
+        [$class, $arguments] = self::parseMiddleware($middleware);
+
+        if (!class_exists($class)) {
+            throw new \InvalidArgumentException(sprintf('Middleware class does not exist: %s', $class));
         }
 
+        // Keyed by the whole identifier, not the class. Two routes asking for
+        // `RequirePermission:users.view` share one proxy, which is the point;
+        // `RequirePermission:users.create` must not get that same proxy, or
+        // every route would enforce whichever permission was registered first.
         return $this->lazyMiddlewares[$middleware] ??= new LazyMiddleware(
             $middleware,
-            fn (): object => $this->container !== null && $this->container->has($middleware)
-                ? $this->container->get($middleware)
-                : new $middleware(),
+            fn (): object => $this->buildMiddleware($class, $arguments),
         );
+    }
+
+    /**
+     * Split `Class:arg1,arg2` into its class and its arguments.
+     *
+     * A middleware that takes a value -- a permission to require, a scope to
+     * admit -- had to be written as `new RequirePermission('users.view')`,
+     * which made the route uncacheable: the compiled cache holds data, and an
+     * object is not data. One application had 1,066 such instances across 85
+     * route files, so the cache it could not build was the one it needed most.
+     *
+     * The class is everything before the first colon. A fully qualified name
+     * contains backslashes and never a colon, so that boundary is unambiguous
+     * -- and the arguments may contain colons of their own, as an API scope
+     * like `organization:read` does. Arguments are split on commas and passed
+     * as strings; a middleware wanting another type converts it, because a
+     * route cache that inferred types would mean the string and the instance
+     * forms behaved differently.
+     *
+     * @return array{0:string, 1:list<string>}
+     */
+    private static function parseMiddleware(string $middleware): array
+    {
+        $colon = strpos($middleware, ':');
+
+        if ($colon === false) {
+            return [$middleware, []];
+        }
+
+        $class = substr($middleware, 0, $colon);
+        $arguments = substr($middleware, $colon + 1);
+
+        return [$class, $arguments === '' ? [] : explode(',', $arguments)];
+    }
+
+    /**
+     * @param class-string $class
+     * @param list<string> $arguments
+     */
+    private function buildMiddleware(string $class, array $arguments): object
+    {
+        // Arguments are the caller's, so the container cannot answer: a shared
+        // binding has no way to know which permission this route wanted. Only
+        // the plain class form is resolved through it, exactly as before.
+        if ($arguments !== []) {
+            return new $class(...$arguments);
+        }
+
+        return $this->container !== null && $this->container->has($class)
+            ? $this->container->get($class)
+            : new $class();
     }
 
     private function shouldDispatchCompiled(ServerRequestInterface $request, CompiledRouteTable $table): bool
@@ -834,7 +889,7 @@ final class RouterFactory
 
     /**
      * @param ReflectionClass<object>|ReflectionMethod $ref
-     * @return array<class-string>
+     * @return array<string>
      */
     private function collectUseMiddlewares(ReflectionClass|ReflectionMethod $ref): array
     {
@@ -851,7 +906,7 @@ final class RouterFactory
 
     /**
      * @param ReflectionClass<object> $ref
-     * @return array<class-string>
+     * @return array<string>
      */
     private function collectGroupMiddlewares(ReflectionClass $ref): array
     {
@@ -990,7 +1045,7 @@ final class RouterFactory
 
     /**
      * @param array<int, mixed> $routes
-     * @param array<class-string|object> $middlewares
+     * @param array<string|object> $middlewares
      */
     private function configureMappedRoutes(
         array $routes,

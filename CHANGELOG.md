@@ -6,6 +6,16 @@ The format is based on Keep a Changelog and this project aims to follow Semantic
 
 ## Unreleased
 
+### Added
+
+- Middleware can be given as `Class:arg1,arg2`, so middleware configured per route stays a string and the route stays cacheable. `new RequirePermission('users.view')` becomes `RequirePermission::class . ':users.view'`; the class is everything before the first colon, and the arguments may contain colons of their own, as an API scope like `organization:read` does. Arguments are split on commas and passed to the constructor as strings.
+
+  The compiled cache holds data, so a middleware instance made a route uncacheable -- `writeCompiled()` refused with "only supports middleware defined as class strings". An application with middleware configured per route therefore could not compile its routes at all: one reached 1,066 instances across 85 route files, and lost the cache precisely because it was large enough to need it.
+
+  One proxy is shared per *identifier* rather than per class. Sharing by class was correct until a class took an argument, at which point two routes requiring different permissions would have shared the proxy built for whichever registered first -- and every one of them would have enforced that permission, silently.
+
+  Arguments cannot come from the container: a shared binding has no way to know which permission a given route wanted. The plain class form resolves through the container exactly as before.
+
 ## 1.3.5 - 2026-10-12
 
 ### Fixed

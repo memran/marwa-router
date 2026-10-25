@@ -13,10 +13,10 @@ use Attribute;
 #[Attribute(Attribute::TARGET_CLASS | Attribute::TARGET_METHOD | Attribute::IS_REPEATABLE)]
 final class UseMiddleware
 {
-    /** @var array<int, class-string> */
+    /** @var array<int, string> */
     public array $middlewares;
 
-    /** @param class-string ...$middlewares */
+    /** @param string ...$middlewares */
     public function __construct(string ...$middlewares)
     {
         $this->middlewares = array_values($middlewares);

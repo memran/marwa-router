@@ -18,7 +18,7 @@ final class RouteDefinition
     private ?string $name = null;
     private ?string $namePrefix = null;
 
-    /** @var array<class-string|object> */
+    /** @var array<string|object> */
     private array $middlewares = [];
     /** @var array<string,string> */
     private array $where = [];
@@ -68,7 +68,7 @@ final class RouteDefinition
         return $this;
     }
 
-    /** @param class-string|object ...$mw */
+    /** @param string|object ...$mw */
     public function middleware(...$mw): self
     {
         array_push($this->middlewares, ...$mw);
